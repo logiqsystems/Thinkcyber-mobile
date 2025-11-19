@@ -1,0 +1,1998 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../services/api_client.dart';
+import '../services/wishlist_store.dart';
+import '../services/cart_service.dart';
+import '../services/localization_service.dart';
+import '../services/translation_service.dart';
+import '../widgets/topic_visuals.dart';
+import '../widgets/translated_text.dart';
+import '../widgets/lottie_loader.dart';
+import 'topic_detail_screen.dart';
+import 'cart_screen.dart';
+import 'account_screen.dart';
+import 'notification_screen.dart';
+
+// Helper class for search results with module/video match
+class _ModuleSearchResult {
+  final CourseTopic topic;
+  final String? matchingModuleTitle;
+  final String? matchingVideoTitle;
+  _ModuleSearchResult({
+    required this.topic, 
+    this.matchingModuleTitle,
+    this.matchingVideoTitle,
+  });
+}
+
+class Dashboard extends StatefulWidget {
+  const Dashboard({super.key, this.onSeeAllCourses});
+
+  final VoidCallback? onSeeAllCourses;
+
+  @override
+  State<Dashboard> createState() => _DashboardState();
+}
+
+class _DashboardState extends State<Dashboard> {
+  static const _background = Color(0xFFF5F7FA);
+  static const _card = Colors.white;
+  static const _text = Color(0xFF1F2937);
+  static const _muted = Color(0xFF6B7280);
+  static const _accent = Color(0xFF2E7DFF);
+  static const _shadow = Color(0x0A000000);
+
+  final ThinkCyberApi _api = ThinkCyberApi();
+  final WishlistStore _wishlist = WishlistStore.instance;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+
+  List<CourseTopic> _topics = [];
+  List<_ModuleSearchResult> _searchResults = [];
+  bool _isLoading = false;
+  bool _isSearching = false;
+  String? _errorMessage;
+  String _userName = 'Explorer';
+  String? _userEmail;
+  double _completionRatio = 0;
+  String _activeCategory = 'All';
+  String _searchQuery = '';
+  String _selectedLanguage = 'English'; // Track selected language
+  String _searchHint = 'Search topics, categories...';
+
+  List<String> _categories = [];
+  List<String> _currentChips = [];
+  Map<String, List<String>> _categorySubcats = {};
+  bool _showingSubcats = false;
+  String? _selectedCategory;
+  late final VoidCallback _wishlistListener;
+  final LocalizationService _localizationService = LocalizationService();
+
+  @override
+  void initState() {
+    super.initState();
+    _currentChips = ['All'];
+    _updateSearchHint();
+    _localizationService.addListener(_onLanguageChanged);
+    _loadSelectedLanguage(); // Load saved language
+    _hydrate();
+    _wishlistListener = () {
+      if (mounted) {
+        setState(() {});
+      }
+    };
+    _wishlist.addListener(_wishlistListener);
+    _wishlist.hydrate();
+  }
+
+  @override
+  void dispose() {
+    _api.dispose();
+    _wishlist.removeListener(_wishlistListener);
+    _localizationService.removeListener(_onLanguageChanged);
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _onLanguageChanged() {
+    print('🔄 Language changed in Dashboard, updating search hint...');
+    _updateSearchHint();
+  }
+
+  Future<void> _updateSearchHint() async {
+    final translationService = TranslationService();
+    final targetLang = _localizationService.languageCode;
+    
+    print('🌐 Updating search hint for language: $targetLang');
+    
+    if (targetLang == 'en') {
+      if (mounted) {
+        setState(() {
+          _searchHint = 'Search topics, categories...';
+        });
+        print('✅ Search hint updated to: $_searchHint');
+      }
+    } else {
+      final translated = await translationService.translate(
+        'Search topics, categories...',
+        'en',
+        targetLang,
+      );
+      print('✅ Translated search hint: $translated');
+      if (mounted) {
+        setState(() {
+          _searchHint = translated;
+        });
+        print('✅ Search hint state updated to: $_searchHint');
+      }
+    }
+  }
+
+  Future<void> _hydrate() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final storedName = prefs.getString('thinkcyber_user_name');
+      final storedEmail = prefs.getString('thinkcyber_email');
+
+      final storedUserId = prefs.getInt('thinkcyber_user_id');
+
+      final response = await _api.fetchTopics(userId: storedUserId);
+      if (!mounted) return;
+
+      final topics = response.topics;
+      final published = topics
+          .where((t) => t.status.toLowerCase() == 'published')
+          .length;
+      final total = topics.length;
+      final ratio = total == 0 ? 0.0 : (published / total).clamp(0.0, 1.0);
+
+      Set<String> uniqueCats = topics.map((t) => t.categoryName).toSet();
+      _categories = ['All', ...uniqueCats.toList()..sort()];
+
+      _categorySubcats.clear();
+      Map<String, Set<String>> tempSubcats = {};
+      for (var topic in topics) {
+        String cat = topic.categoryName;
+        String sub = topic.subcategoryName ?? cat;
+        tempSubcats.putIfAbsent(cat, () => <String>{}).add(sub);
+      }
+      for (var entry in tempSubcats.entries) {
+        _categorySubcats[entry.key] = entry.value.toList()..sort();
+      }
+
+      if (!mounted) return;
+
+      // Clear any active search when refreshing/hydrating topics
+      _searchController.clear();
+      setState(() {
+        _topics = topics;
+        _completionRatio = ratio;
+        _userEmail = storedEmail;
+        _userName = (storedName ?? storedEmail ?? 'Explorer').trim();
+        _currentChips = _categories;
+        _isLoading = false;
+        _isSearching = false;
+        _searchResults = [];
+        _searchQuery = '';
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = error.message;
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage =
+            'Unable to load topics right now. Please try again shortly.';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _onSearchChanged(String query) async {
+    setState(() {
+      _searchQuery = query.toLowerCase().trim();
+      _isSearching = _searchQuery.isNotEmpty;
+    });
+    
+    if (_searchQuery.isEmpty) {
+      setState(() {
+        _searchResults = [];
+      });
+      return;
+    }
+
+    List<_ModuleSearchResult> results = [];
+    
+    for (final topic in _topics) {
+      String? matchingModuleTitle;
+      String? matchingVideoTitle;
+      bool topicMatches = false;
+      
+      // Check topic-level matches
+      if (topic.title.toLowerCase().contains(_searchQuery) ||
+          topic.categoryName.toLowerCase().contains(_searchQuery) ||
+          (topic.subcategoryName?.toLowerCase().contains(_searchQuery) ?? false) ||
+          (topic.description?.toLowerCase().contains(_searchQuery) ?? false)) {
+        topicMatches = true;
+      }
+      
+      // If no topic match, search in modules and videos
+      if (!topicMatches) {
+        try {
+          final detailResp = await _api.fetchTopicDetail(topic.id);
+          final modules = detailResp.topic.modules;
+          
+          for (final module in modules) {
+            // Check module title
+            if (module.title.toLowerCase().contains(_searchQuery)) {
+              matchingModuleTitle = module.title;
+              break;
+            }
+            
+            // Check video titles in this module
+            for (final video in module.videos) {
+              if (video.title.toLowerCase().contains(_searchQuery)) {
+                matchingModuleTitle = module.title;
+                matchingVideoTitle = video.title;
+                break;
+              }
+            }
+            if (matchingModuleTitle != null) break;
+          }
+        } catch (e) {
+          print('Error fetching details for topic ${topic.title}: $e');
+        }
+      }
+      
+      // Add to results if there's any match
+      if (topicMatches || matchingModuleTitle != null) {
+        results.add(_ModuleSearchResult(
+          topic: topic,
+          matchingModuleTitle: matchingModuleTitle,
+          matchingVideoTitle: matchingVideoTitle,
+        ));
+      }
+    }
+    
+    if (mounted) {
+      setState(() {
+        _searchResults = results;
+      });
+    }
+  }
+
+  void _navigateToTopic(CourseTopic topic) {
+    // Clear search when navigating
+    _searchController.clear();
+    _searchFocusNode.unfocus();
+    setState(() {
+      _isSearching = false;
+      _searchQuery = '';
+      _searchResults = [];
+    });
+    
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TopicDetailScreen(topic: topic),
+      ),
+    );
+  }
+
+  List<CourseTopic> get _filteredTopics {
+    if (_activeCategory == 'All') {
+      if (_showingSubcats && _selectedCategory != null) {
+        return _topics
+            .where((t) => t.categoryName == _selectedCategory)
+            .toList();
+      } else {
+        return _topics;
+      }
+    }
+    if (_showingSubcats && _selectedCategory != null) {
+      return _topics
+          .where(
+            (t) =>
+                t.categoryName == _selectedCategory &&
+                t.subcategoryName == _activeCategory,
+          )
+          .toList();
+    } else {
+      return _topics.where((t) => t.categoryName == _activeCategory).toList();
+    }
+  }
+
+  void _navigateToAllCourses() {
+    widget.onSeeAllCourses?.call();
+  }
+
+  // Load selected language from SharedPreferences
+  Future<void> _loadSelectedLanguage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedLanguage = prefs.getString('selected_language');
+      if (savedLanguage != null && mounted) {
+        setState(() {
+          _selectedLanguage = savedLanguage;
+        });
+      }
+    } catch (e) {
+      print('Error loading selected language: $e');
+    }
+  }
+
+  // Save selected language to SharedPreferences
+  Future<void> _saveSelectedLanguage(String language) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('selected_language', language);
+    } catch (e) {
+      print('Error saving selected language: $e');
+    }
+  }
+
+  // Test translation functionality
+  Future<void> _testTranslation(String selectedLanguage) async {
+    print('Testing translation for: $selectedLanguage');
+    
+    String targetCode = 'en'; // Default to English
+    if (selectedLanguage == 'हिन्दी') {
+      targetCode = 'hi';
+    } else if (selectedLanguage == 'తెలుగు') {
+      targetCode = 'te';
+    }
+    
+    if (targetCode != 'en') {
+      try {
+        final translationService = TranslationService();
+        final testTexts = [
+          'Find a source you want to learn!',
+          'Welcome to ThinkCyber',
+          'Cybersecurity Training',
+          'Start Learning Today'
+        ];
+        
+        for (final text in testTexts) {
+          final translation = await translationService.translate(text, 'en', targetCode);
+          print('Translated "$text" to "$translation"');
+        }
+      } catch (e) {
+        print('Translation test error: $e');
+      }
+    }
+  }
+
+  void _showLanguageSelector(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const TranslatedText(
+              'Select Language',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF2D3142),
+              ),
+            ),
+            const SizedBox(height: 20),
+            
+            // English
+            _buildSimpleLanguageOption('English', '🇺🇸', _selectedLanguage == 'English'),
+            const SizedBox(height: 12),
+            
+            // Hindi
+            _buildSimpleLanguageOption('हिन्दी', '🇮🇳', _selectedLanguage == 'हिन्दी'),
+            const SizedBox(height: 12),
+            
+            // Telugu
+            _buildSimpleLanguageOption('తెలుగు', '🇮🇳', _selectedLanguage == 'తెలుగు'),
+            
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSimpleLanguageOption(String language, String flag, bool isSelected) {
+    return GestureDetector(
+      onTap: () async {
+        // Update selected language and save it
+        setState(() {
+          _selectedLanguage = language;
+        });
+        await _saveSelectedLanguage(language);
+        
+        // ✅ Update LocalizationService to trigger app-wide language change
+        final localizationService = LocalizationService();
+        AppLanguage newLanguage = AppLanguage.english;
+        if (language == 'हिन्दी') {
+          newLanguage = AppLanguage.hindi;
+        } else if (language == 'తెలుగు') {
+          newLanguage = AppLanguage.telugu;
+        }
+        await localizationService.changeLanguage(newLanguage);
+        
+        Navigator.pop(context);
+        
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Language changed to $language'),
+              backgroundColor: const Color(0xFF2E7DFF),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              margin: const EdgeInsets.all(16),
+            ),
+          );
+          
+          // Test translation by translating the welcome message
+          _testTranslation(language);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF2E7DFF).withOpacity(0.1) : Colors.transparent,
+          border: Border.all(
+            color: isSelected ? const Color(0xFF2E7DFF) : const Color(0xFFE5E7EB),
+            width: 1.5,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Text(flag, style: const TextStyle(fontSize: 20)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                language,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: isSelected ? const Color(0xFF2E7DFF) : const Color(0xFF2D3142),
+                ),
+              ),
+            ),
+            if (isSelected)
+              const Icon(
+                Icons.check_circle,
+                color: Color(0xFF2E7DFF),
+                size: 20,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _background,
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _hydrate,
+          color: _accent,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(),
+                if (_isSearching) ...[
+                  const SizedBox(height: 12),
+                  _buildSearchResults(),
+                ]
+                else ...[
+                  const SizedBox(height: 12),
+                  _buildCategories(),
+                  const SizedBox(height: 24),
+                  _buildPopularCourses(),
+                  const SizedBox(height: 28),
+                  _buildAllTopics(),
+                ],
+                const SizedBox(height: 80),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF6366F1), // Purple-blue
+            const Color(0xFF4F46E5), // Indigo
+            const Color(0xFF2563EB), // Blue
+          ],
+        ),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(30),
+          bottomRight: Radius.circular(30),
+        ),
+      ),
+      child: Column(
+        children: [
+          // Top bar with user icon on left and other icons on right
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // User Account Icon - left side
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => const AccountScreen(),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.25),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.person_outline,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              
+                // Right side icons
+                Row(
+                  children: [
+                    // Cart Icon
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const CartScreen(),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.25),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.shopping_cart_outlined,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    
+                    // Language Icon
+                    GestureDetector(
+                      onTap: () {
+                        _showLanguageSelector(context);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.25),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.language_outlined,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    
+                    // Notification Icon with badge
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const NotificationScreen(),
+                          ),
+                        );
+                      },
+                      child: Stack(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.25),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.notifications_outlined,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF4444),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          
+          // Greeting section below icons
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const TranslatedText(
+                            'Hi',
+                            style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: TranslatedText(
+                              '$_userName!',
+                              style: const TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text('👋', style: TextStyle(fontSize: 26)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const TranslatedText(
+                        'Let\'s Start Learning',
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w400,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Search bar integrated in header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: TextField(
+                key: ValueKey(_searchHint),
+                controller: _searchController,
+                focusNode: _searchFocusNode,
+                decoration: InputDecoration(
+                  hintText: _searchHint,
+                  hintStyle: const TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: Color(0xFF6366F1),
+                    size: 22,
+                  ),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(
+                            Icons.close,
+                            color: Color(0xFF94A3B8),
+                            size: 20,
+                          ),
+                          onPressed: () {
+                            _searchController.clear();
+                            _searchFocusNode.unfocus();
+                            setState(() {
+                              _searchQuery = '';
+                              _isSearching = false;
+                              _searchResults = [];
+                            });
+                          },
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                ),
+                onChanged: _onSearchChanged,
+                onTap: () {
+                  if (_searchController.text.isNotEmpty && !_isSearching) {
+                    setState(() {
+                      _isSearching = true;
+                    });
+                  }
+                },
+              ),
+            ),
+          ),
+          // Add tap outside detector for search
+          if (_isSearching)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  _searchFocusNode.unfocus();
+                  setState(() {
+                    _isSearching = false;
+                    _searchResults = [];
+                  });
+                },
+                child: Container(
+                  color: Colors.transparent,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F3F5),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: TextField(
+                    key: ValueKey(_searchHint),
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    onChanged: _onSearchChanged,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: _text,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: _searchHint,
+                      hintStyle: const TextStyle(
+                        fontSize: 14,
+                        color: _muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search,
+                        color: _muted.withValues(alpha: 0.6),
+                        size: 20,
+                      ),
+                      suffixIcon: _isSearching
+                          ? IconButton(
+                              icon: Icon(
+                                Icons.clear,
+                                color: _muted.withValues(alpha: 0.6),
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                _searchController.clear();
+                                _onSearchChanged('');
+                                _searchFocusNode.unfocus();
+                                // Only set _isSearching to false if the search box is empty
+                                setState(() {
+                                  if (_searchController.text.isEmpty) {
+                                    _isSearching = false;
+                                  }
+                                  _searchResults = [];
+                                });
+                              },
+                            )
+                          : null,
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          // Search Results Dropdown
+          if (_isSearching && _searchResults.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              decoration: BoxDecoration(
+                color: _card,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(
+                    color: _shadow,
+                    blurRadius: 12,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _searchResults.length > 5 ? 5 : _searchResults.length,
+                separatorBuilder: (_, __) => Divider(
+                  height: 1,
+                  color: _muted.withValues(alpha: 0.1),
+                ),
+                itemBuilder: (context, index) {
+                  final result = _searchResults[index];
+                  final topic = result.topic;
+                  final matchingModuleTitle = result.matchingModuleTitle;
+                  final matchingVideoTitle = result.matchingVideoTitle;
+                  
+                  return ListTile(
+                    onTap: () => _navigateToTopic(topic),
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: TopicImage(
+                          imageUrl: topic.thumbnailUrl,
+                          title: topic.title,
+                          width: 40,
+                          height: 40,
+                        ),
+                      ),
+                    ),
+                    title: matchingModuleTitle != null
+                        ? Text(
+                            matchingVideoTitle ?? matchingModuleTitle,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blueAccent,
+                            ),
+                          )
+                        : TranslatedText(
+                            topic.title,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: _text,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                    subtitle: matchingModuleTitle != null
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TranslatedText(
+                                topic.title,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: _muted,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                              if (matchingVideoTitle != null)
+                                Text(
+                                  'Module: $matchingModuleTitle',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.green,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                            ],
+                          )
+                        : TranslatedText(
+                            topic.categoryName,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: _muted,
+                            ),
+                          ),
+                    trailing: Icon(
+                      Icons.arrow_forward_ios,
+                      size: 14,
+                      color: _muted.withValues(alpha: 0.5),
+                    ),
+                  );
+                },
+              ),
+            ),
+          // No Results Message
+          if (_isSearching && _searchResults.isEmpty && _searchQuery.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _card,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(
+                    color: _shadow,
+                    blurRadius: 12,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.search_off,
+                    color: _muted.withValues(alpha: 0.5),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'No topics found for "$_searchQuery"',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: _muted.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchResults() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Search Results
+          if (_searchResults.isNotEmpty)
+            Container(
+              decoration: BoxDecoration(
+                color: _card,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(
+                    color: _shadow,
+                    blurRadius: 12,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _searchResults.length,
+                separatorBuilder: (_, __) => Divider(
+                  height: 1,
+                  color: _muted.withValues(alpha: 0.1),
+                ),
+                itemBuilder: (context, index) {
+                  final result = _searchResults[index];
+                  final topic = result.topic;
+                  final matchingModuleTitle = result.matchingModuleTitle;
+                  final matchingVideoTitle = result.matchingVideoTitle;
+                  
+                  return ListTile(
+                    onTap: () => _navigateToTopic(topic),
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: TopicImage(
+                          imageUrl: topic.thumbnailUrl,
+                          title: topic.title,
+                          width: 40,
+                          height: 40,
+                        ),
+                      ),
+                    ),
+                    title: matchingModuleTitle != null
+                        ? Text(
+                            matchingVideoTitle ?? matchingModuleTitle,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blueAccent,
+                            ),
+                          )
+                        : TranslatedText(
+                            topic.title,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: _text,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                    subtitle: matchingModuleTitle != null
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TranslatedText(
+                                topic.title,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: _muted,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                              if (matchingVideoTitle != null)
+                                Text(
+                                  'Module: $matchingModuleTitle',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.green,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                            ],
+                          )
+                        : TranslatedText(
+                            topic.categoryName,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: _muted,
+                            ),
+                          ),
+                    trailing: Icon(
+                      Icons.arrow_forward_ios,
+                      size: 14,
+                      color: _muted.withValues(alpha: 0.5),
+                    ),
+                  );
+                },
+              ),
+            ),
+          
+          // No Results Message
+          if (_searchResults.isEmpty && _searchQuery.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: _card,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(
+                    color: _shadow,
+                    blurRadius: 12,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.search_off,
+                    color: _muted.withValues(alpha: 0.5),
+                    size: 48,
+                  ),
+                  const SizedBox(height: 12),
+                  TranslatedText(
+                    'No results found for "$_searchQuery"',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: _muted,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // 👉 Fixed Categories Layout with Wrap
+  Widget _buildCategories() {
+    final isSub = _showingSubcats && _selectedCategory != null;
+    final items = _currentChips;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TranslatedText(
+                isSub ? "$_selectedCategory Subcategories" : "Categories",
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: _text,
+                ),
+              ),
+              if (isSub)
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    _showingSubcats = false;
+                    _selectedCategory = null;
+                    _activeCategory = 'All';
+                    _currentChips = _categories;
+                  }),
+                  icon: const Icon(Icons.arrow_back_ios_new, size: 14),
+                  label: const TranslatedText("Back"),
+                )
+              else
+                GestureDetector(
+                  onTap: () => setState(() => _activeCategory = 'All'),
+                  child: const TranslatedText(
+                    "See All",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: items.map((chip) {
+                final isActive = _activeCategory == chip;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() => _activeCategory = chip);
+                      if (!_showingSubcats &&
+                          chip != 'All' &&
+                          _categorySubcats.containsKey(chip)) {
+                        setState(() {
+                          _selectedCategory = chip;
+                          _showingSubcats = true;
+                          _currentChips = [
+                            'All',
+                            ...(_categorySubcats[chip] ?? []),
+                          ];
+                          _activeCategory = 'All';
+                        });
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isActive
+                            ? _accent.withValues(alpha: 0.1)
+                            : const Color(0xFFF1F3F5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isActive ? _accent : Colors.transparent,
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _getCategoryIcon(chip, isSub: isSub),
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(width: 6),
+                          TranslatedText(
+                            chip,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: isActive ? _accent : _muted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getCategoryIcon(String category, {bool isSub = false}) {
+    if (isSub) return '📖';
+    switch (category.toLowerCase()) {
+      case 'all':
+        return '📚';
+      case 'cybersecurity':
+      case 'cybersecurity fundamentals':
+        return '🔒';
+      case 'network security':
+        return '🌐';
+      case 'ethical hacking':
+        return '💻';
+      default:
+        return '📖';
+    }
+  }
+
+  Future<void> _toggleWishlist(CourseTopic topic) async {
+    final added = await _wishlist.toggleCourse(summary: topic);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: TranslatedText(added ? 'Added to wishlist' : 'Removed from wishlist'),
+      ),
+    );
+  }
+
+  Widget _buildPopularCourses() {
+    if (_isLoading && _topics.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: LottieLoader(
+            width: 120,
+            height: 120,
+          ),
+        ),
+      );
+    }
+    if (_errorMessage != null && _topics.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: _ErrorCard(message: _errorMessage!, onRetry: _hydrate),
+      );
+    }
+
+    final filtered = _filteredTopics;
+    final featured = filtered.where((t) => t.isFeatured).toList();
+
+    if (featured.isEmpty) {
+      if (filtered.isEmpty) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: _EmptyCard(onRetry: _hydrate),
+        );
+      }
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const TranslatedText(
+                "Featured Topics",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: _text,
+                ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  setState(() => _activeCategory = 'All');
+                  _navigateToAllCourses();
+                },
+                child: const TranslatedText(
+                  "See All",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          height: 235,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            scrollDirection: Axis.horizontal,
+            itemCount: featured.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 16),
+            itemBuilder: (context, index) {
+              final course = featured[index];
+              return _PopularCourseCard(
+                topic: course,
+                isWishlisted: _wishlist.contains(course.id),
+                onToggleWishlist: () => _toggleWishlist(course),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 👉 All Topics horizontal carousel
+  Widget _buildAllTopics() {
+    final filtered = _filteredTopics;
+    if (filtered.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const TranslatedText(
+                "All Topics",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: _text,
+                ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  setState(() => _activeCategory = 'All');
+                  _navigateToAllCourses();
+                },
+                child: const TranslatedText(
+                  "See All",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          SizedBox(
+            height: 235,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: filtered.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 16),
+              itemBuilder: (context, index) {
+                final course = filtered[index];
+                return _PopularCourseCard(
+                  topic: course,
+                  isWishlisted: _wishlist.contains(course.id),
+                  onToggleWishlist: () => _toggleWishlist(course),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PopularCourseCard extends StatelessWidget {
+  final CourseTopic topic;
+  final bool isWishlisted;
+  final VoidCallback onToggleWishlist;
+  final double? width;
+  const _PopularCourseCard({
+    required this.topic,
+    required this.isWishlisted,
+    required this.onToggleWishlist,
+    this.width,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final heroTag = topicHeroTag(topic.id, 'popular');
+    final isFree = topic.isFree || topic.price == 0;
+    final bool isOwned = topic.isEnrolled;
+
+    String priceText(num value) {
+      if (value % 1 == 0) {
+        return '₹${value.toInt()}';
+      }
+      return '₹${value.toStringAsFixed(2)}';
+    }
+
+    final String priceLabel = isOwned
+        ? 'Enrolled'
+        : (isFree ? 'Free' : priceText(topic.price));
+    final Color priceColor = isOwned
+        ? const Color(0xFF22C55E)
+        : (isFree ? Colors.green : _DashboardState._accent);
+
+    Widget _buildThumbnail() {
+      return TopicImage(
+        imageUrl: topic.thumbnailUrl,
+        title: topic.title,
+      );
+    }
+
+    return GestureDetector(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TopicDetailScreen(topic: topic)),
+      ),
+      child: Container(
+        width: width ?? 170,
+        decoration: BoxDecoration(
+          color: _DashboardState._card,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: _DashboardState._shadow,
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                  ),
+                  child: Hero(
+                    tag: heroTag,
+                    child: SizedBox(
+                      height: 120,
+                      width: double.infinity,
+                      child: _buildThumbnail(),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: _WishlistIconButton(
+                    isActive: isWishlisted,
+                    onTap: onToggleWishlist,
+                  ),
+                ),
+                Positioned(
+                  bottom: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: priceColor,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: TranslatedText(
+                      priceLabel,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TranslatedText(
+                      topic.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: _DashboardState._text,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    TranslatedText(
+                      "by ${topic.categoryName}",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: _DashboardState._muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const Spacer(),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.play_circle_outline,
+                          size: 12,
+                          color: _DashboardState._accent,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: TranslatedText(
+                            "${topic.durationMinutes} min",
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: _DashboardState._accent,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const Icon(
+                          Icons.star,
+                          size: 12,
+                          color: Color(0xFFFBBF24),
+                        ),
+                        const SizedBox(width: 3),
+                        const Text(
+                          "4.5",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: _DashboardState._text,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// 👉 Grid Card for All Topics
+class _GridCourseCard extends StatelessWidget {
+  final CourseTopic topic;
+  final bool isWishlisted;
+  final VoidCallback onToggleWishlist;
+  final VoidCallback onTap;
+
+  const _GridCourseCard({
+    required this.topic,
+    required this.isWishlisted,
+    required this.onToggleWishlist,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isFree = topic.isFree || topic.price == 0;
+    final bool isOwned = topic.isEnrolled;
+
+    String priceText(num value) {
+      if (value % 1 == 0) {
+        return '₹${value.toInt()}';
+      }
+      return '₹${value.toStringAsFixed(2)}';
+    }
+
+    final String priceLabel = isOwned
+        ? 'Enrolled'
+        : (isFree ? 'Free' : priceText(topic.price));
+    final Color priceColor = isOwned
+        ? const Color(0xFF22C55E)
+        : (isFree ? Colors.green : _DashboardState._accent);
+
+    Widget _buildThumbnail() {
+      return SizedBox(
+        height: 120,
+        width: double.infinity,
+        child: TopicImage(
+          imageUrl: topic.thumbnailUrl,
+          title: topic.title,
+          height: 120,
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: _DashboardState._card,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: _DashboardState._shadow,
+              blurRadius: 10,
+              offset: Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Thumbnail with price + wishlist
+            Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  child: _buildThumbnail(),
+                ),
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: priceColor,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: TranslatedText(
+                      priceLabel,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 8,
+                  top: 8,
+                  child: _WishlistPill(
+                    isActive: isWishlisted,
+                    onToggle: onToggleWishlist,
+                  ),
+                ),
+              ],
+            ),
+            // Info section
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TranslatedText(
+                      topic.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _DashboardState._text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TranslatedText(
+                      topic.description.isNotEmpty
+                          ? topic.description
+                          : 'Learn about ${topic.categoryName.toLowerCase()}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _DashboardState._muted,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                    const Spacer(),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _DashboardState._accent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: TranslatedText(
+                            topic.difficulty.toUpperCase(),
+                            style: const TextStyle(
+                              color: _DashboardState._accent,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.schedule, 
+                              size: 14, 
+                              color: _DashboardState._muted.withValues(alpha: 0.7),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              topic.durationMinutes > 0
+                                  ? '${topic.durationMinutes}m'
+                                  : 'Self-paced',
+                              style: TextStyle(
+                                color: _DashboardState._muted.withValues(alpha: 0.8),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Wishlist pill widget
+class _WishlistPill extends StatelessWidget {
+  final bool isActive;
+  final VoidCallback onToggle;
+
+  const _WishlistPill({
+    required this.isActive,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onToggle,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x1A000000),
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Icon(
+          isActive ? Icons.favorite : Icons.favorite_border,
+          color: isActive ? Colors.red : _DashboardState._muted,
+          size: 16,
+        ),
+      ),
+    );
+  }
+}
+
+class _WishlistIconButton extends StatelessWidget {
+  const _WishlistIconButton({required this.isActive, required this.onTap});
+
+  final bool isActive;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Icon(
+          isActive ? Icons.favorite : Icons.favorite_border,
+          color: isActive
+              ? Colors.red
+              : _DashboardState._muted.withValues(alpha: 0.7),
+          size: 18,
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorCard extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _ErrorCard({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: _DashboardState._card,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.cloud_off,
+            color: _DashboardState._muted.withValues(alpha: 0.4),
+            size: 48,
+          ),
+          const SizedBox(height: 16),
+          TranslatedText(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 14,
+              color: _DashboardState._text,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const TranslatedText('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyCard extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _EmptyCard({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: _DashboardState._card,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.library_books_outlined,
+            color: _DashboardState._muted.withValues(alpha: 0.4),
+            size: 48,
+          ),
+          const SizedBox(height: 16),
+          const TranslatedText(
+            "No topics yet",
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: _DashboardState._text,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const TranslatedText(
+            "We are calibrating your curriculum.\nCome back soon!",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: _DashboardState._muted,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const TranslatedText('Refresh'),
+          ),
+        ],
+      ),
+    );
+  }
+}
