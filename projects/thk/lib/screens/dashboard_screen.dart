@@ -759,21 +759,25 @@ class _DashboardState extends State<Dashboard> {
     final planType = category.planType;
     final bundlePrice = double.tryParse(category.bundlePrice) ?? 0;
     
-    // Color based on plan type
-    final colors = {
-      'FREE': const Color(0xFF10B981),
-      'BUNDLE': const Color(0xFFF59E0B),
-      'FLEXIBLE': const Color(0xFF6366F1),
+    // Modern color scheme with gradients
+    final colorMap = {
+      'FREE': {
+        'primary': const Color(0xFF10B981),
+        'light': const Color(0xFFDCFCE7),
+      },
+      'BUNDLE': {
+        'primary': const Color(0xFFF59E0B),
+        'light': const Color(0xFFFEF3C7),
+      },
+      'FLEXIBLE': {
+        'primary': const Color(0xFF6366F1),
+        'light': const Color(0xFFEEF2FF),
+      },
     };
 
-    final badgeColors = {
-      'FREE': const Color(0xFFDCFCE7),
-      'BUNDLE': const Color(0xFFFEF3C7),
-      'FLEXIBLE': const Color(0xFFEEF2FF),
-    };
-
-    final badgeColor = colors[planType] ?? const Color(0xFF6366F1);
-    final bgColor = badgeColors[planType] ?? const Color(0xFFEEF2FF);
+    final colors = colorMap[planType] ?? colorMap['FLEXIBLE']!;
+    final primaryColor = colors['primary'] as Color;
+    final lightColor = colors['light'] as Color;
 
     IconData getPlanIcon() {
       switch (planType) {
@@ -789,106 +793,148 @@ class _DashboardState extends State<Dashboard> {
     }
 
     return Container(
-      width: 160,
-      padding: const EdgeInsets.all(12),
+      width: 155,
+      height: 220,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: const Color(0xFFE5E7EB),
-          width: 1,
+          color: const Color(0xFFF3F4F6),
+          width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
+            color: primaryColor.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Icon and Badge
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: bgColor,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  getPlanIcon(),
-                  color: badgeColor,
-                  size: 20,
-                ),
+          // Top colored section
+          Container(
+            height: 60,
+            decoration: BoxDecoration(
+              color: lightColor,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
-                decoration: BoxDecoration(
-                  color: bgColor,
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                child: TranslatedText(
-                  planType,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: badgeColor,
+            ),
+            child: Center(
+              child: Icon(
+                getPlanIcon(),
+                color: primaryColor,
+                size: 32,
+              ),
+            ),
+          ),
+          // Content section
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Plan type badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: lightColor,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: TranslatedText(
+                          planType,
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: primaryColor,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      // Title
+                      TranslatedText(
+                        category.name,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1F2937),
+                          height: 1.3,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                ),
+                  // Bottom info
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Topics count
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.library_books_rounded,
+                            size: 11,
+                            color: primaryColor.withOpacity(0.7),
+                          ),
+                          const SizedBox(width: 4),
+                          TranslatedText(
+                            '${category.topicsCount} topics',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFF6B7280),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      // Price or free badge
+                      if (planType == 'FREE')
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: lightColor,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: TranslatedText(
+                            'Free',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: primaryColor,
+                            ),
+                          ),
+                        )
+                      else if (bundlePrice > 0)
+                        TranslatedText(
+                          '₹${bundlePrice.toStringAsFixed(0)}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: primaryColor,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          // Title
-          TranslatedText(
-            category.name,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: _text,
             ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 6),
-          // Topics count
-          Row(
-            children: [
-              const Icon(
-                Icons.library_books_rounded,
-                size: 12,
-                color: Color(0xFF6B7280),
-              ),
-              const SizedBox(width: 3),
-              TranslatedText(
-                '${category.topicsCount}',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF6B7280),
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          // Price (if not free)
-          if (planType != 'FREE' && bundlePrice > 0)
-            TranslatedText(
-              '₹${bundlePrice.toStringAsFixed(0)}',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: badgeColor,
-              ),
-            ),
         ],
       ),
     );
