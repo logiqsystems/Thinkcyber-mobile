@@ -2,11 +2,14 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_stripe/flutter_stripe.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
+import '../config/razorpay_config.dart';
 import '../services/api_client.dart';
+import '../services/razorpay_http_service.dart';
 import '../services/wishlist_store.dart';
 import '../services/cart_service.dart';
 import '../widgets/topic_visuals.dart';
@@ -18,10 +21,95 @@ const _darkText = Color(0xFF2D3142);
 const _lightText = Color(0xFF9094A6);
 const _cardBg = Color(0xFFF8F9FA);
 
+class _UploadedVideoPlayerScreen extends StatefulWidget {
+  final String videoUrl;
+  final String title;
+
+  const _UploadedVideoPlayerScreen({required this.videoUrl, required this.title});
+
+  @override
+  State<_UploadedVideoPlayerScreen> createState() => _UploadedVideoPlayerScreenState();
+}
+
+class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> {
+  late WebViewController _webViewController;
+
+  @override
+  void initState() {
+    super.initState();
+    debugPrint('Video URL: ${widget.videoUrl}');
+    
+    // Create the HTML content for video player
+    final htmlContent = '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        body {
+          margin: 0;
+          padding: 0;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          background-color: #000;
+          font-family: Arial, sans-serif;
+        }
+        .video-container {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          background-color: #000;
+        }
+        video {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+        .error {
+          color: #ff0000;
+          text-align: center;
+          padding: 20px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="video-container">
+        <video controls controlsList="nodownload" autoplay disablePictureInPicture>
+          <source src="${widget.videoUrl}" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      </div>
+    </body>
+    </html>
+    ''';
+
+    _webViewController = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent('Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36')
+      ..loadHtmlString(htmlContent);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+      ),
+      body: WebViewWidget(controller: _webViewController),
+    );
+  }
+}
+
 class TopicDetailScreen extends StatefulWidget {
-  const TopicDetailScreen({super.key, required this.topic});
+  const TopicDetailScreen({super.key, required this.topic, this.fromEnrollments = false});
 
   final CourseTopic topic;
+  final bool fromEnrollments;
 
   @override
   State<TopicDetailScreen> createState() => _TopicDetailScreenState();
@@ -31,18 +119,24 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
     with SingleTickerProviderStateMixin {
   final ThinkCyberApi _api = ThinkCyberApi();
   final WishlistStore _wishlist = WishlistStore.instance;
+  late Razorpay _razorpay;
   TopicDetail? _detail;
   bool _loading = true;
   String? _error;
   late TabController _tabController;
   int? _userId;
   String? _userEmail;
+  String? _currentOrderId;
   bool _processingCheckout = false;
   bool _isWishlisted = false;
 
   @override
   void initState() {
     super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
     _tabController = TabController(length: 2, vsync: this);
     _initialize();
     _hydrateWishlist();
@@ -57,6 +151,7 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
   void dispose() {
     _tabController.dispose();
     _api.dispose();
+    _razorpay.clear();
     super.dispose();
   }
 
@@ -66,6 +161,7 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
       _error = null;
     });
     try {
+      // Removed static detail injection after testing
       final resolvedUserId = userId ?? _userId;
       final response = await _api.fetchTopicDetail(
         widget.topic.id,
@@ -128,13 +224,100 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
     });
   }
 
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    // Handle Razorpay payment success - verify payment and enroll
+    debugPrint('✅ Razorpay | Payment Success - PaymentId: ${response.paymentId}');
+    
+    final messenger = ScaffoldMessenger.of(context);
+    final userId = _userId;
+    final orderId = _currentOrderId;
+
+    if (userId == null || orderId == null) {
+      debugPrint('❌ Razorpay | Missing userId or orderId');
+      messenger.showSnackBar(
+        const SnackBar(content: TranslatedText('Payment successful!')),
+      );
+      return;
+    }
+
+    try {
+      debugPrint('✅ Razorpay | Verifying payment and enrolling user...');
+      debugPrint('✅ Razorpay | PaymentId: ${response.paymentId}, OrderId: $orderId');
+      
+      // Verify payment and auto-enroll
+      final enrollResponse = await _api.verifyPaymentAndEnroll(
+        userId: userId,
+        topicId: widget.topic.id,
+        paymentId: response.paymentId!,
+        orderId: orderId,
+        signature: response.signature!,
+      );
+      
+      if (!mounted) return;
+
+      if (enrollResponse.success) {
+        debugPrint('✅ Razorpay | Payment verified and user enrolled successfully!');
+        if (mounted) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: TranslatedText('Payment successful! You are now enrolled.'),
+              backgroundColor: Color(0xFF22C55E),
+            ),
+          );
+          
+          setState(() {
+            // Mark user as enrolled since payment verification succeeded
+            _detail = _detail?.copyWith(isEnrolled: true);
+          });
+        }
+        // Don't refresh detail here - user might see buttons flash
+        // The UI is already updated with isEnrolled: true
+      } else {
+        debugPrint('❌ Razorpay | Verification failed: ${enrollResponse.message}');
+        messenger.showSnackBar(
+          SnackBar(content: Text('Enrollment error: ${enrollResponse.message}')),
+        );
+      }
+    } catch (error, stackTrace) {
+      debugPrint('❌ Razorpay | Error verifying payment: $error');
+      debugPrint('❌ Razorpay | Stack trace: $stackTrace');
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Error: $error')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _processingCheckout = false);
+      }
+    }
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    // Handle Razorpay payment failure
+    final errorMessage = response.message ?? response.code ?? 'Payment cancelled';
+    debugPrint('Razorpay | Payment Error - Code: ${response.code}, Message: ${response.message}');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Payment failed: $errorMessage')),
+    );
+    setState(() => _processingCheckout = false);
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    // Handle Razorpay external wallet
+    final walletName = response.walletName ?? 'Wallet';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('External wallet selected: $walletName')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final summary = widget.topic;
     final detail = _detail;
     final bool summaryEnrolled = summary.isEnrolled;
     final bool detailEnrolled = detail?.isEnrolled ?? false;
-    final bool isEnrolled = detailEnrolled || summaryEnrolled;
+    final bool isEnrolled = widget.fromEnrollments || detailEnrolled || summaryEnrolled;
     final bool isFreeCourse = detail?.isFree ?? summary.isFree || summary.price == 0;
     final num priceValue = detail?.price ?? summary.price;
     final String formattedPrice;
@@ -342,8 +525,7 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
                         ],
                       ),
                     ),
-      bottomNavigationBar: !_loading && _error == null && detail != null &&
-              !isEnrolled
+      bottomNavigationBar: !_loading && _error == null && detail != null && !isEnrolled && !widget.fromEnrollments
           ? _BottomBar(
               priceLabel: priceDisplay,
               isFree: isFreeCourse,
@@ -383,20 +565,33 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
         final response = await _api.enrollFreeCourse(
           userId: userId,
           topicId: detail.id,
-        );
-
-        final message = response.message.isNotEmpty
-            ? response.message
-            : (response.success
-                ? 'Enrollment successful!'
-                : 'Unable to enroll in this course.');
-
-        messenger.showSnackBar(
-          SnackBar(content: Text(message)),
+          email: email,
         );
 
         if (response.success) {
-          await _fetchDetail(userId: userId);
+          debugPrint('✅ FreeEnroll | Enrollment successful!');
+          if (mounted) {
+            messenger.showSnackBar(
+              const SnackBar(
+                content: TranslatedText('You are now enrolled!'),
+                backgroundColor: Color(0xFF22C55E),
+              ),
+            );
+            
+            setState(() {
+              // Mark user as enrolled since enrollment succeeded
+              _detail = _detail?.copyWith(isEnrolled: true);
+            });
+          }
+          // Don't refresh detail here - user might see buttons flash
+          // The UI is already updated with isEnrolled: true
+        } else {
+          final message = response.message.isNotEmpty
+              ? response.message
+              : 'Unable to enroll in this course.';
+          
+          debugPrint('❌ FreeEnroll | Enrollment failed: $message');
+          messenger.showSnackBar(SnackBar(content: Text(message)));
         }
       } on ApiException catch (error) {
         messenger.showSnackBar(SnackBar(content: Text(error.message)));
@@ -417,58 +612,59 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
 
     setState(() => _processingCheckout = true);
     try {
-      final response = await _api.createMobileEnrollment(
+      // Step 1: Create order via backend
+      debugPrint('✅ Razorpay | Creating order via backend...');
+      
+      final orderData = await _api.createOrderForCourse(
         userId: userId,
         topicId: detail.id,
         email: email,
       );
 
-      debugPrint(
-        'Stripe | Received clientSecret=${response.clientSecret} '
-        'paymentIntentId=${response.paymentIntentId ?? 'null'}',
-      );
-
-      await Stripe.instance.initPaymentSheet(
-        paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: response.clientSecret,
-          merchantDisplayName: 'ThinkCyber LMS',
-          allowsDelayedPaymentMethods: false,
-        ),
-      );
-
-      await Stripe.instance.presentPaymentSheet();
-      messenger.showSnackBar(
-        const SnackBar(content: TranslatedText('Payment successful!')),
-      );
-      await _fetchDetail(userId: userId);
-    } on StripeException catch (error) {
-      debugPrint('Stripe | Failure ${error.error.code} ${error.error.message}');
-      final failureCode = error.error.code;
-      if (failureCode == FailureCode.Canceled) {
-        messenger.showSnackBar(
-          const SnackBar(content: TranslatedText('Payment cancelled.')),
-        );
-      } else {
-        messenger.showSnackBar(
-          SnackBar(
-            content: TranslatedText(
-              error.error.localizedMessage ??
-                  'Unable to complete payment. Please try again.',
-            ),
-          ),
-        );
+      final orderId = orderData['orderId'] as String?;
+      final keyId = orderData['keyId'] as String?;
+      
+      if (orderId == null || keyId == null) {
+        throw Exception('Invalid order response from backend');
       }
-    } on ApiException catch (error) {
-      debugPrint('Stripe | ApiException ${error.statusCode} ${error.message}');
-      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+      
+      debugPrint('✅ Razorpay | Order created: $orderId');
+
+      // Step 2: Open Razorpay dialog with the order
+      var options = {
+        'key': keyId,
+        'amount': (detail.price * 100).toInt(), // Amount in paise
+        'name': RazorpayConfig.merchantName,
+        'description': detail.title,
+        'order_id': orderId,
+        'prefill': {
+          'contact': '',
+          'email': email,
+        },
+        'external': {
+          'wallets': RazorpayConfig.supportedWallets,
+        }
+      };
+
+      // Store orderId for payment verification
+      _currentOrderId = orderId;
+
+      try {
+        _razorpay.open(options);
+      } catch (e) {
+        debugPrint('Razorpay | Error opening dialog: $e');
+        messenger.showSnackBar(
+          SnackBar(content: Text('Error: ${e.toString()}')),
+        );
+        setState(() => _processingCheckout = false);
+      }
     } catch (error, stackTrace) {
-      debugPrint('Stripe | Unexpected error $error\n$stackTrace');
+      debugPrint('Razorpay | Unexpected error creating order: $error\n$stackTrace');
       messenger.showSnackBar(
         const SnackBar(
           content: TranslatedText('Unable to start checkout. Please try again.'),
         ),
       );
-    } finally {
       if (mounted) {
         setState(() => _processingCheckout = false);
       }
@@ -1107,11 +1303,21 @@ class _VideoListItem extends StatelessWidget {
     String? videoId = _extractYouTubeId(video.videoUrl);
 
     if (videoId != null) {
+      // It's a YouTube video
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) =>
               _VideoPlayerScreen(videoId: videoId, title: video.title),
+        ),
+      );
+    } else if (video.videoUrl.isNotEmpty) {
+      // It's an uploaded video (direct URL)
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) =>
+              _UploadedVideoPlayerScreen(videoUrl: video.videoUrl, title: video.title),
         ),
       );
     } else {
@@ -1122,17 +1328,33 @@ class _VideoListItem extends StatelessWidget {
   }
 
   String? _extractYouTubeId(String url) {
+    if (url.isEmpty) return null;
+    
     // Handle youtu.be format
     if (url.contains('youtu.be/')) {
-      return url.split('youtu.be/').last.split('?').first;
+      return url.split('youtu.be/').last.split('?').first.split('#').first;
     }
-    // Handle youtube.com format
+    // Handle youtube.com/watch?v= format
     if (url.contains('youtube.com/watch?v=')) {
       return url.split('v=').last.split('&').first;
     }
-    // Handle youtube.com/embed format
+    // Handle youtube.com/embed/ format
     if (url.contains('youtube.com/embed/')) {
-      return url.split('embed/').last.split('?').first;
+      return url.split('embed/').last.split('?').first.split('#').first;
+    }
+    // Handle bare video ID (11 characters, alphanumeric + _ and -)
+    if (RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(url.trim())) {
+      return url.trim();
+    }
+    // If it looks like a YouTube URL but we haven't matched it yet, try to extract from the last part
+    if (url.contains('youtube')) {
+      final parts = url.split('/');
+      for (int i = parts.length - 1; i >= 0; i--) {
+        final part = parts[i].split('?').first.split('#').first;
+        if (RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(part)) {
+          return part;
+        }
+      }
     }
     return null;
   }

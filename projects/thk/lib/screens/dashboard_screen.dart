@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_client.dart';
@@ -13,23 +14,29 @@ import 'topic_detail_screen.dart';
 import 'cart_screen.dart';
 import 'account_screen.dart';
 import 'notification_screen.dart';
+import 'wishlist_screen.dart';
 
 // Helper class for search results with module/video match
 class _ModuleSearchResult {
   final CourseTopic topic;
   final String? matchingModuleTitle;
   final String? matchingVideoTitle;
+  final bool isModuleDescriptionMatch;
+  final String? matchedDescription;
   _ModuleSearchResult({
     required this.topic, 
     this.matchingModuleTitle,
     this.matchingVideoTitle,
+    this.isModuleDescriptionMatch = false,
+    this.matchedDescription,
   });
 }
 
 class Dashboard extends StatefulWidget {
-  const Dashboard({super.key, this.onSeeAllCourses});
+  const Dashboard({super.key, this.onSeeAllCourses, this.onSeeAllPaidCourses});
 
   final VoidCallback? onSeeAllCourses;
+  final VoidCallback? onSeeAllPaidCourses;
 
   @override
   State<Dashboard> createState() => _DashboardState();
@@ -140,13 +147,39 @@ class _DashboardState extends State<Dashboard> {
       final prefs = await SharedPreferences.getInstance();
       final storedName = prefs.getString('thinkcyber_user_name');
       final storedEmail = prefs.getString('thinkcyber_email');
-
       final storedUserId = prefs.getInt('thinkcyber_user_id');
 
+      // Fetch topics with userId to get basic enrollment info
       final response = await _api.fetchTopics(userId: storedUserId);
+      var topics = response.topics;
+
+      // Also fetch user enrollments separately for accurate enrollment status
+      if (storedUserId != null && storedUserId > 0) {
+        try {
+          final enrolledTopics = await _api.fetchUserEnrollments(userId: storedUserId);
+          final enrolledIds = enrolledTopics.map((t) => t.id).toSet();
+          
+          // Update topics to mark those that are enrolled
+          topics = topics.map((topic) {
+            if (enrolledIds.contains(topic.id)) {
+              // Use copyWith to update isEnrolled while preserving all other fields
+              return topic.copyWith(isEnrolled: true);
+            }
+            return topic;
+          }).toList();
+        } catch (e) {
+          debugPrint('Error fetching user enrollments: $e');
+          // Continue with the original topics if enrollment fetch fails
+        }
+      }
+
       if (!mounted) return;
 
-      final topics = response.topics;
+      // Debug: Print all loaded courses and their properties
+      for (var t in topics) {
+        debugPrint('Course: ${t.title}, isFree: ${t.isFree}, price: ${t.price}, isEnrolled: ${t.isEnrolled}, status: ${t.status}');
+      }
+      
       final published = topics
           .where((t) => t.status.toLowerCase() == 'published')
           .length;
@@ -198,6 +231,85 @@ class _DashboardState extends State<Dashboard> {
     }
   }
 
+  // Helper method to extract description snippet around the match
+  String _extractDescriptionSnippet(String description, String searchQuery) {
+    final lowerDesc = description.toLowerCase();
+    final queryLower = searchQuery.toLowerCase();
+    final matchIndex = lowerDesc.indexOf(queryLower);
+    
+    if (matchIndex == -1) return description.length > 100 ? '${description.substring(0, 100)}...' : description;
+    
+    // Extract snippet around the match (50 chars before and after)
+    final start = (matchIndex - 50).clamp(0, description.length);
+    final end = (matchIndex + queryLower.length + 50).clamp(0, description.length);
+    
+    String snippet = description.substring(start, end);
+    
+    // Add ellipsis if we're not at the beginning/end
+    if (start > 0) snippet = '...$snippet';
+    if (end < description.length) snippet = '$snippet...';
+    
+    return snippet;
+  }
+
+  // Helper method to create highlighted text with matched terms in bold
+  Widget _buildHighlightedText(String text, String searchQuery) {
+    if (searchQuery.isEmpty) {
+      return Text(
+        text,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Color(0xFF4B5563),
+          fontStyle: FontStyle.italic,
+        ),
+      );
+    }
+
+    final lowerText = text.toLowerCase();
+    final lowerQuery = searchQuery.toLowerCase();
+    final matches = <TextSpan>[];
+    
+    int start = 0;
+    while (true) {
+      final index = lowerText.indexOf(lowerQuery, start);
+      if (index == -1) {
+        // Add remaining text
+        if (start < text.length) {
+          matches.add(TextSpan(text: text.substring(start)));
+        }
+        break;
+      }
+      
+      // Add text before match
+      if (index > start) {
+        matches.add(TextSpan(text: text.substring(start, index)));
+      }
+      
+      // Add highlighted match
+      matches.add(TextSpan(
+        text: text.substring(index, index + searchQuery.length),
+        style: const TextStyle(
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF1F2937), // Dark text
+          backgroundColor: Color(0xFFFEF08A), // Yellow highlight
+        ),
+      ));
+      
+      start = index + searchQuery.length;
+    }
+    
+    return RichText(
+      text: TextSpan(
+        style: const TextStyle(
+          fontSize: 12,
+          color: Color(0xFF4B5563),
+          fontStyle: FontStyle.italic,
+        ),
+        children: matches,
+      ),
+    );
+  }
+
   Future<void> _onSearchChanged(String query) async {
     setState(() {
       _searchQuery = query.toLowerCase().trim();
@@ -227,6 +339,8 @@ class _DashboardState extends State<Dashboard> {
       }
       
       // If no topic match, search in modules and videos
+      bool isDescriptionMatch = false;
+      String? matchedDescriptionText;
       if (!topicMatches) {
         try {
           final detailResp = await _api.fetchTopicDetail(topic.id);
@@ -236,6 +350,15 @@ class _DashboardState extends State<Dashboard> {
             // Check module title
             if (module.title.toLowerCase().contains(_searchQuery)) {
               matchingModuleTitle = module.title;
+              break;
+            }
+            
+            // Check module description
+            if (module.description.toLowerCase().contains(_searchQuery)) {
+              matchingModuleTitle = module.title;
+              isDescriptionMatch = true;
+              // Extract a snippet around the match for display
+              matchedDescriptionText = _extractDescriptionSnippet(module.description, _searchQuery);
               break;
             }
             
@@ -260,6 +383,8 @@ class _DashboardState extends State<Dashboard> {
           topic: topic,
           matchingModuleTitle: matchingModuleTitle,
           matchingVideoTitle: matchingVideoTitle,
+          isModuleDescriptionMatch: isDescriptionMatch,
+          matchedDescription: matchedDescriptionText,
         ));
       }
     }
@@ -311,8 +436,12 @@ class _DashboardState extends State<Dashboard> {
     }
   }
 
-  void _navigateToAllCourses() {
-    widget.onSeeAllCourses?.call();
+  void _navigateToAllCourses({bool showPaidTab = false}) {
+    if (showPaidTab) {
+      widget.onSeeAllPaidCourses?.call();
+    } else {
+      widget.onSeeAllCourses?.call();
+    }
   }
 
   // Load selected language from SharedPreferences
@@ -576,6 +705,34 @@ class _DashboardState extends State<Dashboard> {
                 // Right side icons
                 Row(
                   children: [
+                    // Wishlist Icon
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const WishlistScreen(),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.25),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.favorite_border_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+
                     // Cart Icon
                     GestureDetector(
                       onTap: () {
@@ -620,7 +777,7 @@ class _DashboardState extends State<Dashboard> {
                           ),
                         ),
                         child: const Icon(
-                          Icons.language_outlined,
+                          Icons.g_translate,
                           color: Colors.white,
                           size: 20,
                         ),
@@ -628,52 +785,52 @@ class _DashboardState extends State<Dashboard> {
                     ),
                     const SizedBox(width: 10),
                     
-                    // Notification Icon with badge
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => const NotificationScreen(),
-                          ),
-                        );
-                      },
-                      child: Stack(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.25),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.3),
-                                width: 1,
-                              ),
-                            ),
-                            child: const Icon(
-                              Icons.notifications_outlined,
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ),
-                          Positioned(
-                            top: 8,
-                            right: 8,
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFF4444),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 1.5,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    // Notification Icon with badge - Hidden for now
+                    // GestureDetector(
+                    //   onTap: () {
+                    //     Navigator.of(context).push(
+                    //       MaterialPageRoute(
+                    //         builder: (context) => const NotificationScreen(),
+                    //       ),
+                    //     );
+                    //   },
+                    //   child: Stack(
+                    //     children: [
+                    //       Container(
+                    //         padding: const EdgeInsets.all(10),
+                    //         decoration: BoxDecoration(
+                    //           color: Colors.white.withOpacity(0.25),
+                    //           borderRadius: BorderRadius.circular(12),
+                    //           border: Border.all(
+                    //             color: Colors.white.withOpacity(0.3),
+                    //             width: 1,
+                    //           ),
+                    //         ),
+                    //         child: const Icon(
+                    //           Icons.notifications_outlined,
+                    //           color: Colors.white,
+                    //           size: 20,
+                    //         ),
+                    //       ),
+                    //       Positioned(
+                    //         top: 8,
+                    //         right: 8,
+                    //         child: Container(
+                    //           width: 8,
+                    //           height: 8,
+                    //           decoration: BoxDecoration(
+                    //             color: const Color(0xFFFF4444),
+                    //             shape: BoxShape.circle,
+                    //             border: Border.all(
+                    //               color: Colors.white,
+                    //               width: 1.5,
+                    //             ),
+                    //           ),
+                    //         ),
+                    //       ),
+                    //     ],
+                    //   ),
+                    // ),
                   ],
                 ),
               ],
@@ -1061,76 +1218,261 @@ class _DashboardState extends State<Dashboard> {
                   final topic = result.topic;
                   final matchingModuleTitle = result.matchingModuleTitle;
                   final matchingVideoTitle = result.matchingVideoTitle;
+                  final isModuleDescMatch = result.isModuleDescriptionMatch;
+                  final matchedDescription = result.matchedDescription;
                   
-                  return ListTile(
-                    onTap: () => _navigateToTopic(topic),
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: SizedBox(
-                        width: 40,
-                        height: 40,
-                        child: TopicImage(
-                          imageUrl: topic.thumbnailUrl,
-                          title: topic.title,
-                          width: 40,
-                          height: 40,
-                        ),
-                      ),
-                    ),
-                    title: matchingModuleTitle != null
-                        ? Text(
-                            matchingVideoTitle ?? matchingModuleTitle,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.blueAccent,
-                            ),
-                          )
-                        : TranslatedText(
-                            topic.title,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: _text,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    child: InkWell(
+                      onTap: () => _navigateToTopic(topic),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFFE5E7EB),
+                            width: 1,
                           ),
-                    subtitle: matchingModuleTitle != null
-                        ? Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TranslatedText(
-                                topic.title,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: _muted,
-                                  fontStyle: FontStyle.italic,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.04),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Topic Image
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: TopicImage(
+                                  imageUrl: topic.thumbnailUrl,
+                                  title: topic.title,
+                                  width: 48,
+                                  height: 48,
                                 ),
                               ),
-                              if (matchingVideoTitle != null)
-                                Text(
-                                  'Module: $matchingModuleTitle',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.green,
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                                ),
-                            ],
-                          )
-                        : TranslatedText(
-                            topic.categoryName,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: _muted,
                             ),
-                          ),
-                    trailing: Icon(
-                      Icons.arrow_forward_ios,
-                      size: 14,
-                      color: _muted.withValues(alpha: 0.5),
+                            const SizedBox(width: 12),
+                            
+                            // Content
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Main Title
+                                  if (matchingModuleTitle != null)
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: matchingVideoTitle != null 
+                                                ? const Color(0xFFFEF3C7)  // Yellow for videos
+                                                : const Color(0xFFDCFCE7), // Green for modules
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Icon(
+                                            matchingVideoTitle != null 
+                                                ? Icons.play_circle_outline 
+                                                : Icons.article_outlined,
+                                            size: 14,
+                                            color: matchingVideoTitle != null 
+                                                ? const Color(0xFFD97706) 
+                                                : const Color(0xFF059669),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            matchingVideoTitle ?? matchingModuleTitle,
+                                            style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: Color(0xFF1F2937),
+                                              height: 1.3,
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  else
+                                    TranslatedText(
+                                      topic.title,
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF1F2937),
+                                        height: 1.3,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  
+                                  const SizedBox(height: 6),
+                                  
+                                  // Topic Title (when showing module/video match)
+                                  if (matchingModuleTitle != null)
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.topic_outlined,
+                                          size: 12,
+                                          color: const Color(0xFF9CA3AF),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: TranslatedText(
+                                            topic.title,
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              color: Color(0xFF6B7280),
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  
+                                  // Match Type Badge
+                                  if (matchingModuleTitle != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 6),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: matchingVideoTitle != null
+                                                  ? const Color(0xFFFEF3C7) // Yellow for video
+                                                  : isModuleDescMatch
+                                                      ? const Color(0xFFDCFCE7) // Green for description
+                                                      : const Color(0xFFDBEAFE), // Blue for title
+                                              borderRadius: BorderRadius.circular(12),
+                                              border: Border.all(
+                                                color: matchingVideoTitle != null
+                                                    ? const Color(0xFFEAB308)
+                                                    : isModuleDescMatch
+                                                        ? const Color(0xFF059669)
+                                                        : const Color(0xFF3B82F6),
+                                                width: 0.5,
+                                              ),
+                                            ),
+                                            child: Text(
+                                              matchingVideoTitle != null
+                                                  ? 'Video Match'
+                                                  : isModuleDescMatch
+                                                      ? 'Description Match'
+                                                      : 'Module Match',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                                color: matchingVideoTitle != null
+                                                    ? const Color(0xFFD97706)
+                                                    : isModuleDescMatch
+                                                        ? const Color(0xFF059669)
+                                                        : const Color(0xFF3B82F6),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  
+                                  // Description Snippet
+                                  if (matchedDescription != null && matchedDescription.isNotEmpty)
+                                    Container(
+                                      margin: const EdgeInsets.only(top: 8),
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF8FAFC),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: const Color(0xFFE2E8F0),
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                Icons.format_quote,
+                                                size: 12,
+                                                color: const Color(0xFF64748B),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                'Matched Content:',
+                                                style: const TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Color(0xFF64748B),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 6),
+                                          _buildHighlightedText(matchedDescription, _searchQuery),
+                                        ],
+                                      ),
+                                    ),
+                                  
+                                  // Category (for topic-level matches)
+                                  if (matchingModuleTitle == null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.category_outlined,
+                                            size: 12,
+                                            color: const Color(0xFF9CA3AF),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          TranslatedText(
+                                            topic.categoryName,
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Color(0xFF9CA3AF),
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            
+                            // Arrow Icon
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Icon(
+                                Icons.arrow_forward_ios_rounded,
+                                size: 16,
+                                color: const Color(0xFFD1D5DB),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -1190,12 +1532,15 @@ class _DashboardState extends State<Dashboard> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              TranslatedText(
-                isSub ? "$_selectedCategory Subcategories" : "Categories",
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: _text,
+              Flexible(
+                child: TranslatedText(
+                  isSub ? "$_selectedCategory Subcategories" : "Categories",
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: _text,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               if (isSub)
@@ -1208,18 +1553,6 @@ class _DashboardState extends State<Dashboard> {
                   }),
                   icon: const Icon(Icons.arrow_back_ios_new, size: 14),
                   label: const TranslatedText("Back"),
-                )
-              else
-                GestureDetector(
-                  onTap: () => setState(() => _activeCategory = 'All'),
-                  child: const TranslatedText(
-                    "See All",
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: _muted,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
                 ),
             ],
           ),
@@ -1340,7 +1673,20 @@ class _DashboardState extends State<Dashboard> {
     }
 
     final filtered = _filteredTopics;
-    final featured = filtered.where((t) => t.isFeatured).toList();
+    final featured = filtered.where((t) => !t.isFree && t.price > 0).toList();
+        // Debug: Print all filtered paid courses
+        for (var t in featured) {
+          debugPrint('PAID COURSE: ${t.title}, isFree: ${t.isFree}, price: ${t.price}, status: ${t.status}');
+        }
+    
+    // Debug: Print information about courses
+    debugPrint('Dashboard: Total courses: ${filtered.length}, Paid courses: ${featured.length}');
+    if (filtered.isNotEmpty) {
+      debugPrint('Dashboard: Sample courses:');
+      for (var i = 0; i < filtered.length && i < 3; i++) {
+        debugPrint('  ${i+1}. ${filtered[i].title} - Price: ${filtered[i].price}, IsFree: ${filtered[i].isFree}');
+      }
+    }
 
     if (featured.isEmpty) {
       if (filtered.isEmpty) {
@@ -1349,7 +1695,53 @@ class _DashboardState extends State<Dashboard> {
           child: _EmptyCard(onRetry: _hydrate),
         );
       }
-      return const SizedBox.shrink();
+      // Show section even with no paid courses for debugging
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: TranslatedText(
+                    "Featured Topics (No courses available)",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: _text,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () {
+                    setState(() => _activeCategory = 'All');
+                    _navigateToAllCourses();
+                  },
+                  child: const TranslatedText(
+                    "See All",
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              "No featured topics available at the moment.",
+              style: TextStyle(color: _muted),
+            ),
+          ),
+        ],
+      );
     }
 
     return Column(
@@ -1360,18 +1752,21 @@ class _DashboardState extends State<Dashboard> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const TranslatedText(
-                "Featured Topics",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: _text,
+              Flexible(
+                child: TranslatedText(
+                  "Featured Topics",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: _text,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               GestureDetector(
                 onTap: () {
                   setState(() => _activeCategory = 'All');
-                  _navigateToAllCourses();
+                  _navigateToAllCourses(showPaidTab: true);
                 },
                 child: const TranslatedText(
                   "See All",
@@ -1508,9 +1903,14 @@ class _PopularCourseCard extends StatelessWidget {
     }
 
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => TopicDetailScreen(topic: topic)),
-      ),
+      onTap: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => TopicDetailScreen(topic: topic)),
+        );
+        // Refresh dashboard when returning from detail screen
+        final state = context.findAncestorStateOfType<_DashboardState>();
+        state?._hydrate();
+      },
       child: Container(
         width: width ?? 170,
         decoration: BoxDecoration(

@@ -30,17 +30,38 @@ String _truncateDescription(String description, int maxLength) {
   return '$truncated...';
 }
 
+/// Public controller for programmatically switching tabs
+class AllCoursesController {
+  void Function(int)? _switchToTab;
+  
+  void switchToTab(int index) {
+    _switchToTab?.call(index);
+  }
+  
+  void _attach(void Function(int) callback) {
+    _switchToTab = callback;
+  }
+  
+  void _detach() {
+    _switchToTab = null;
+  }
+}
+
 class AllCoursesScreen extends StatefulWidget {
-  const AllCoursesScreen({super.key});
+  const AllCoursesScreen({super.key, this.initialTabIndex = 0, this.controller});
+
+  final int initialTabIndex;
+  final AllCoursesController? controller;
 
   @override
   State<AllCoursesScreen> createState() => _AllCoursesScreenState();
 }
 
-class _AllCoursesScreenState extends State<AllCoursesScreen> {
+class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerProviderStateMixin {
   final ThinkCyberApi _api = ThinkCyberApi();
   final WishlistStore _wishlist = WishlistStore.instance;
   late final VoidCallback _wishlistListener;
+  late TabController _tabController;
   List<CourseTopic> _courses = const [];
   List<CourseTopic> _freeCourses = const [];
   List<CourseTopic> _paidCourses = const [];
@@ -54,6 +75,12 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(
+      length: 3, 
+      vsync: this,
+      initialIndex: widget.initialTabIndex,
+    );
+    _tabController.addListener(_onTabChanged);
     _loadCourses();
     _loadEnrollments();
     _wishlistListener = () {
@@ -61,11 +88,37 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> {
     };
     _wishlist.addListener(_wishlistListener);
     _wishlist.hydrate();
+    
+    // Attach controller if provided
+    widget.controller?._attach(_switchToTab);
+  }
+
+  /// Public method to switch to a specific tab
+  void switchToTab(int index) {
+    _switchToTab(index);
+  }
+  
+  /// Internal method to switch tabs
+  void _switchToTab(int index) {
+    if (index >= 0 && index < 3 && mounted) {
+      _tabController.animateTo(index);
+    }
+  }
+
+  void _onTabChanged() {
+    // When user switches to Enrollments tab (index 2), refresh the enrollments
+    if (_tabController.index == 2) {
+      debugPrint('🔄 Enrollments tab selected, refreshing enrollments...');
+      _loadEnrollments(showLoader: false);
+    }
   }
 
   @override
   void dispose() {
+    widget.controller?._detach();
     _api.dispose();
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
     _wishlist.removeListener(_wishlistListener);
     super.dispose();
   }
@@ -160,6 +213,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> {
     List<CourseTopic> courses, {
     Future<void> Function()? onRefresh,
     Widget? emptyState,
+    bool hidePriceBadge = false,
   }) {
     if (courses.isEmpty) {
       return emptyState ?? const _EmptyState();
@@ -183,6 +237,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> {
           return _CourseCard(
             course: course,
             isWishlisted: _wishlist.contains(course.id),
+            hidePriceBadge: hidePriceBadge,
             onToggleWishlist: () async {
               final messenger = ScaffoldMessenger.of(context);
               final added = await _wishlist.toggleCourse(summary: course);
@@ -195,11 +250,21 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> {
                 ),
               );
             },
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => TopicDetailScreen(topic: course),
-              ),
-            ),
+            onTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TopicDetailScreen(
+                    topic: course,
+                    fromEnrollments: _tabController.index == 2,
+                  ),
+                ),
+              );
+              // Refresh enrollments when returning from detail screen
+              if (mounted && _tabController.index == 2) {
+                debugPrint('🔄 Returning to Enrollments tab, refreshing...');
+                _loadEnrollments(showLoader: false);
+              }
+            },
           );
         },
       ),
@@ -249,66 +314,83 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> {
       );
     }
 
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
+    return Scaffold(
+      backgroundColor: _pageBackground,
+      appBar: AppBar(
+        title: const TranslatedText('All Topics'),
         backgroundColor: _pageBackground,
-        appBar: AppBar(
-          title: const TranslatedText('All Topics'),
-          backgroundColor: _pageBackground,
-          foregroundColor: _textColor,
-          surfaceTintColor: Colors.transparent, // removes default Material3 tint line
+        foregroundColor: _textColor,
+        surfaceTintColor: Colors.transparent, // removes default Material3 tint line
 
-          elevation: 0,
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(52),
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade200,
+        elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(52),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(25),
+            ),
+
+            child: TabBar(
+              controller: _tabController,
+              indicatorSize: TabBarIndicatorSize.tab,
+              labelColor: Colors.white,
+              unselectedLabelColor: _mutedColor,
+              isScrollable: false,
+              indicator: BoxDecoration(
+                color: _accentColor,
                 borderRadius: BorderRadius.circular(25),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x22000000),
+                    blurRadius: 8,
+                    offset: Offset(0, 3),
+                  ),
+                ],
               ),
-
-              child: TabBar(
-                 indicatorSize: TabBarIndicatorSize.tab, // 🔥 makes indicator match tab width
-
-                labelColor: Colors.white,
-                unselectedLabelColor: _mutedColor,
-                indicator: BoxDecoration(
-                  color: _accentColor,
-                  borderRadius: BorderRadius.circular(25),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x22000000),
-                      blurRadius: 8,
-                      offset: Offset(0, 3),
-                    ),
-                  ],
+              labelStyle: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 12,
+              ),
+              labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+              tabs: [
+                Tab(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: TranslatedText('Free (${_freeCourses.length})'),
+                  ),
                 ),
-                labelStyle: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
+                Tab(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: TranslatedText('Paid (${_paidCourses.length})'),
+                  ),
                 ),
-                tabs: [
-                  Tab(child: TranslatedText('Free (${_freeCourses.length})')),
-                  Tab(child: TranslatedText('Paid (${_paidCourses.length})')),
-                  Tab(
+                Tab(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
                     child: TranslatedText(_userId == null
                         ? 'Enrollments'
                         : 'Enrollments (${_enrolledCourses.length})'),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
-        body: TabBarView(
-          children: [
-            _buildGrid(_freeCourses),
-            _buildGrid(_paidCourses),
-            _buildEnrollmentsTab(),
-          ],
-        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildGrid(_freeCourses),
+          _buildGrid(_paidCourses),
+          _buildEnrollmentsTab(),
+        ],
       ),
     );
   }
@@ -336,6 +418,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> {
       _enrolledCourses,
       onRefresh: () => _loadEnrollments(showLoader: false),
       emptyState: const _EnrollmentsEmptyState(),
+      hidePriceBadge: true,
     );
   }
 }
@@ -346,12 +429,14 @@ class _CourseCard extends StatelessWidget {
     required this.isWishlisted,
     required this.onToggleWishlist,
     required this.onTap,
+    this.hidePriceBadge = false,
   });
 
   final CourseTopic course;
   final bool isWishlisted;
   final Future<void> Function() onToggleWishlist;
   final VoidCallback onTap;
+  final bool hidePriceBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -404,32 +489,33 @@ class _CourseCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                Positioned(
-                  right: 10,
-                  top: 10,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: priceColor,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x1A000000),
-                          blurRadius: 8,
-                          offset: Offset(0, 2),
+                if (!hidePriceBadge)
+                  Positioned(
+                    right: 10,
+                    top: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: priceColor,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x1A000000),
+                            blurRadius: 8,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        priceLabel,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
                         ),
-                      ],
-                    ),
-                    child: Text(
-                      priceLabel,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
-                ),
                 Positioned(
                   left: 10,
                   top: 10,

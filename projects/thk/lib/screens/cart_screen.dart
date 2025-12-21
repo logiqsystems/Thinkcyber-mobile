@@ -1,4 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../config/razorpay_config.dart';
 import '../services/api_client.dart';
 import '../services/cart_service.dart';
 import '../widgets/translated_text.dart';
@@ -13,17 +19,137 @@ class CartScreen extends StatefulWidget {
 
 class _CartScreenState extends State<CartScreen> {
   final CartService _cartService = CartService.instance;
+  final ThinkCyberApi _api = ThinkCyberApi();
+  late Razorpay _razorpay;
   bool _isLoading = false;
+  int? _userId;
+  String? _userEmail;
+  String? _currentOrderId;
 
   @override
   void initState() {
     super.initState();
     _loadCartItems();
     _cartService.addListener(_onCartChanged);
+    _initializeRazorpay();
+    _loadUserInfo();
+  }
+
+  void _initializeRazorpay() {
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+  }
+
+  Future<void> _loadUserInfo() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rawUser = prefs.getString('thinkcyber_user');
+    
+    if (rawUser != null && rawUser.isNotEmpty) {
+      try {
+        final json = jsonDecode(rawUser);
+        if (json is Map<String, dynamic>) {
+          final user = SignupUser.fromJson(json);
+          setState(() {
+            _userId = user.id;
+            _userEmail = user.email;
+          });
+        }
+      } catch (e) {
+        debugPrint('Error loading user info: $e');
+      }
+    }
+  }
+
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    debugPrint('✅ Payment Success: ${response.paymentId}');
+    
+    if (_currentOrderId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: TranslatedText('Error: Order ID not found')),
+      );
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      // Get list of paid courses from cart
+      final paidCourses = _cartService.items.where((item) => !item.isFree && item.price > 0).toList();
+
+      if (paidCourses.isEmpty) {
+        throw Exception('No paid courses found in cart');
+      }
+
+      // Verify payment and enroll for each paid course
+      int enrolledCount = 0;
+      for (final item in paidCourses) {
+        try {
+          final verifyResponse = await _api.verifyPaymentAndEnroll(
+            userId: _userId!,
+            topicId: item.id,
+            paymentId: response.paymentId!,
+            orderId: _currentOrderId!,
+            signature: response.signature!,
+          );
+
+          if (verifyResponse.success) {
+            debugPrint('✅ Enrolled in paid course: ${item.title}');
+            enrolledCount++;
+          } else {
+            debugPrint('❌ Failed to enroll in ${item.title}: ${verifyResponse.message}');
+          }
+        } catch (e) {
+          debugPrint('❌ Error enrolling in course ${item.id}: $e');
+        }
+      }
+
+      if (!mounted) return;
+      
+      if (enrolledCount > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: TranslatedText('Payment successful! Enrolled in $enrolledCount course(s).'),
+            backgroundColor: const Color(0xFF22C55E),
+          ),
+        );
+
+        // Clear cart and navigate back
+        await _cartService.checkout();
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: TranslatedText('Payment successful but enrollment failed.')),
+        );
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Enrollment failed: ${e.toString()}')),
+      );
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    debugPrint('❌ Payment Error: ${response.message}');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Payment failed: ${response.message}')),
+    );
+    setState(() => _isLoading = false);
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    debugPrint('External Wallet: ${response.walletName}');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${response.walletName} wallet selected')),
+    );
   }
 
   @override
   void dispose() {
+    _razorpay.clear();
     _cartService.removeListener(_onCartChanged);
     super.dispose();
   }
@@ -59,36 +185,110 @@ class _CartScreenState extends State<CartScreen> {
       return;
     }
 
-    setState(() => _isLoading = true);
-    
-    try {
-      // Simulate checkout process
-      await Future.delayed(const Duration(seconds: 2));
-      
-      // Complete checkout
-      await _cartService.checkout();
-      
-      if (!mounted) return;
-      
-      setState(() => _isLoading = false);
-      
+    if (_userId == null || _userId! <= 0 || _userEmail == null || _userEmail!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: TranslatedText('Checkout completed successfully!'),
-          backgroundColor: Color(0xFF22C55E),
-        ),
+        const SnackBar(content: TranslatedText('Please sign in to continue with checkout.')),
       );
-      
-      // Navigate back after successful checkout
-      Navigator.pop(context);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Separate free and paid courses
+      final freeCourses = _cartService.items.where((item) => item.isFree || item.price == 0).toList();
+      final paidCourses = _cartService.items.where((item) => !item.isFree && item.price > 0).toList();
+
+      // Enroll in all free courses first
+      for (final item in freeCourses) {
+        try {
+          await _api.enrollFreeCourse(
+            userId: _userId!,
+            topicId: item.id,
+            email: _userEmail!,
+          );
+          debugPrint('✅ Enrolled in free course: ${item.title}');
+        } catch (e) {
+          debugPrint('❌ Failed to enroll in free course ${item.title}: $e');
+        }
+      }
+
+      // If there are paid courses, process them
+      if (paidCourses.isNotEmpty) {
+        // For cart with multiple paid courses, create order for the first one with total amount
+        // Backend will handle enrollment for all courses after payment
+        final totalAmount = paidCourses.fold<double>(0, (sum, item) => sum + item.price);
+        
+        debugPrint('✅ Creating order for ${paidCourses.length} paid course(s), total: ₹$totalAmount');
+        
+        // Create order using the first course ID but with total amount
+        final orderData = await _api.createOrderForCourse(
+          userId: _userId!,
+          topicId: paidCourses.first.id,
+          email: _userEmail!,
+        );
+
+        final orderId = orderData['orderId'] as String?;
+        final keyId = orderData['keyId'] as String?;
+
+        if (orderId == null || keyId == null) {
+          throw Exception('Invalid order response from backend');
+        }
+
+        debugPrint('✅ Order created: $orderId');
+
+        // Open Razorpay payment dialog
+        var options = {
+          'key': keyId,
+          'amount': (totalAmount * 100).toInt(), // Amount in paise
+          'name': RazorpayConfig.merchantName,
+          'description': 'ThinkCyber Course Bundle',
+          'order_id': orderId,
+          'prefill': {
+            'contact': '',
+            'email': _userEmail,
+          },
+          'external': {
+            'wallets': RazorpayConfig.supportedWallets,
+          }
+        };
+
+        _currentOrderId = orderId;
+
+        try {
+          _razorpay.open(options);
+        } catch (e) {
+          debugPrint('Error opening Razorpay: $e');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: ${e.toString()}')),
+          );
+          setState(() => _isLoading = false);
+        }
+      } else {
+        // Only free courses - enroll complete
+        if (!mounted) return;
+
+        setState(() => _isLoading = false);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: TranslatedText('Successfully enrolled in all courses!'),
+            backgroundColor: Color(0xFF22C55E),
+          ),
+        );
+
+        // Clear cart and navigate back
+        await _cartService.checkout();
+        Navigator.pop(context);
+      }
     } catch (e) {
       if (!mounted) return;
-      
+
       setState(() => _isLoading = false);
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: TranslatedText('Checkout failed: ${e.toString()}'),
+          content: Text('Checkout failed: ${e.toString()}'),
           backgroundColor: Colors.red,
         ),
       );

@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_client.dart';
@@ -28,7 +29,7 @@ class OtpVerificationScreen extends StatefulWidget {
   State<OtpVerificationScreen> createState() => _OtpVerificationScreenState();
 }
 
-class _OtpVerificationScreenState extends State<OtpVerificationScreen> with TickerProviderStateMixin {
+class _OtpVerificationScreenState extends State<OtpVerificationScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _otpController = TextEditingController();
   final _otpFocusNode = FocusNode();
@@ -51,6 +52,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> with Tick
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _otpController.dispose();
     _otpFocusNode.dispose();
@@ -58,6 +60,41 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> with Tick
     _fadeController.dispose();
     _api.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    debugPrint('📱 OTP Screen - App lifecycle changed to: $state');
+    
+    // When app resumes (user comes back from checking email), restore focus
+    if (state == AppLifecycleState.resumed) {
+      if (mounted && _otpController.text.length < 6) {
+        debugPrint('🔍 OTP Screen - App resumed, current OTP length: ${_otpController.text.length}');
+        // Ensure system keyboard is shown
+        SystemChannels.textInput.invokeMethod('TextInput.show');
+        
+        // Multiple delayed attempts to ensure focus is restored
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (mounted) {
+            debugPrint('🎯 OTP Screen - First focus attempt');
+            FocusScope.of(context).requestFocus(_otpFocusNode);
+            SystemChannels.textInput.invokeMethod('TextInput.show');
+          }
+        });
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted && !_otpFocusNode.hasFocus) {
+            debugPrint('🎯 OTP Screen - Second focus attempt (backup)');
+            FocusScope.of(context).requestFocus(_otpFocusNode);
+            SystemChannels.textInput.invokeMethod('TextInput.show');
+          }
+        });
+      }
+    } else if (state == AppLifecycleState.paused) {
+      debugPrint('⏸️ OTP Screen - App paused');
+    } else if (state == AppLifecycleState.inactive) {
+      debugPrint('⏸️ OTP Screen - App inactive');
+    }
   }
 
   String _translateSync(String text) {
@@ -98,6 +135,20 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> with Tick
     
     _preloadTranslations();
     _startResendTimer();
+    
+    // Add lifecycle observer
+    WidgetsBinding.instance.addObserver(this);
+    
+    // Request focus after frame is built and show keyboard
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (mounted) {
+          debugPrint('🎯 OTP Screen - Initial focus request on initState');
+          FocusScope.of(context).requestFocus(_otpFocusNode);
+          SystemChannels.textInput.invokeMethod('TextInput.show');
+        }
+      });
+    });
   }
 
   void _startResendTimer() {
@@ -446,26 +497,50 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> with Tick
                               }),
                             ),
                           ),
-                          // Hidden TextField for keyboard input
-                          Opacity(
-                            opacity: 0.01,
-                            child: SizedBox(
-                              height: 1,
-                              child: TextFormField(
+                          const SizedBox(height: 8),
+                          // Hidden TextField for keyboard input - kept accessible for focus
+                          SizedBox(
+                            height: 0,
+                            child: IgnorePointer(
+                              ignoring: false,
+                              child: TextField(
                                 controller: _otpController,
                                 focusNode: _otpFocusNode,
                                 keyboardType: TextInputType.number,
+                                textInputAction: TextInputAction.done,
                                 maxLength: 6,
                                 autofocus: false,
+                                enableInteractiveSelection: false,
+                                showCursor: false,
                                 decoration: const InputDecoration(
                                   border: InputBorder.none,
                                   counterText: '',
+                                  contentPadding: EdgeInsets.zero,
+                                  isDense: true,
                                 ),
+                                style: const TextStyle(
+                                  color: Colors.transparent,
+                                  fontSize: 1,
+                                ),
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                  LengthLimitingTextInputFormatter(6),
+                                ],
                                 onChanged: (value) {
-                                  setState(() {});
-                                  if (value.length == 6) {
-                                     FocusScope.of(context).unfocus();
+                                  debugPrint('📝 OTP input changed: ${value.length}/6');
+                                  if (mounted) {
+                                    setState(() {});
+                                    if (value.length == 6) {
+                                      FocusScope.of(context).unfocus();
+                                    }
                                   }
+                                },
+                                onTap: () {
+                                  debugPrint('👆 OTP TextField tapped');
+                                  // Ensure cursor is at the end
+                                  _otpController.selection = TextSelection.fromPosition(
+                                    TextPosition(offset: _otpController.text.length),
+                                  );
                                 },
                               ),
                             ),
