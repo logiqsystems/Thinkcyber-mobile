@@ -234,7 +234,7 @@ class _DashboardState extends State<Dashboard> {
       final ratio = total == 0 ? 0.0 : (published / total).clamp(0.0, 1.0);
 
       Set<String> uniqueCats = topics.map((t) => t.categoryName).toSet();
-      _categories = ['All', ...uniqueCats.toList()..sort()];
+      List<String> stringCategories = ['All', ...uniqueCats.toList()..sort()];
 
       _categorySubcats.clear();
       Map<String, Set<String>> tempSubcats = {};
@@ -256,7 +256,7 @@ class _DashboardState extends State<Dashboard> {
         _completionRatio = ratio;
         _userEmail = storedEmail;
         _userName = (storedName ?? storedEmail ?? 'Explorer').trim();
-        _currentChips = _categories;
+        _currentChips = stringCategories;  // Keep _currentChips as string categories for filtering
         _isLoading = false;
         _isSearching = false;
         _searchResults = [];
@@ -276,6 +276,9 @@ class _DashboardState extends State<Dashboard> {
         _isLoading = false;
       });
     }
+    
+    // Also refresh categories from API
+    await _loadCategoriesData();
   }
 
   // Helper method to extract description snippet around the match
@@ -663,7 +666,6 @@ class _DashboardState extends State<Dashboard> {
   }
 
   @override
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _background,
@@ -699,25 +701,21 @@ class _DashboardState extends State<Dashboard> {
 
   Widget _buildCategoriesSection() {
     if (_categoriesLoading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: CircularProgressIndicator(),
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16),
+        child: SizedBox(
+          height: 100,
+          child: Center(child: CircularProgressIndicator()),
         ),
       );
     }
 
     if (_categories.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-          ),
-          child: const Center(
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16),
+        child: SizedBox(
+          height: 80,
+          child: Center(
             child: TranslatedText(
               'No categories available',
               style: TextStyle(color: Color(0xFF6B7280)),
@@ -735,26 +733,29 @@ class _DashboardState extends State<Dashboard> {
           TranslatedText(
             'Learning Plans & Bundles',
             style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
               color: _text,
             ),
           ),
-          const SizedBox(height: 14),
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _categories.length,
-            itemBuilder: (context, index) {
-              return _buildCategoryCard(_categories[index]);
-            },
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _categories.map((category) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: _buildCompactCategoryCard(category),
+                );
+              }).toList(),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCategoryCard(CourseCategory category) {
+  Widget _buildCompactCategoryCard(CourseCategory category) {
     final planType = category.planType;
     final bundlePrice = double.tryParse(category.bundlePrice) ?? 0;
     
@@ -788,11 +789,11 @@ class _DashboardState extends State<Dashboard> {
     }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      width: 160,
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: const Color(0xFFE5E7EB),
           width: 1,
@@ -800,119 +801,94 @@ class _DashboardState extends State<Dashboard> {
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
+            blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Icon
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              getPlanIcon(),
-              color: badgeColor,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 14),
-          // Content
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Title and Badge
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: TranslatedText(
-                        category.name,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: _text,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: bgColor,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: TranslatedText(
-                        planType,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: badgeColor,
-                        ),
-                      ),
-                    ),
-                  ],
+          // Icon and Badge
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                const SizedBox(height: 8),
-                // Description
-                TranslatedText(
-                  category.description,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF6B7280),
-                    height: 1.4,
+                child: Icon(
+                  getPlanIcon(),
+                  color: badgeColor,
+                  size: 20,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: TranslatedText(
+                  planType,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: badgeColor,
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 10),
-                // Bottom row: Topics count and Price
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.library_books_rounded,
-                          size: 14,
-                          color: Color(0xFF6B7280),
-                        ),
-                        const SizedBox(width: 4),
-                        TranslatedText(
-                          '${category.topicsCount} topics',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF6B7280),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (planType != 'FREE' && bundlePrice > 0)
-                      TranslatedText(
-                        '₹${bundlePrice.toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: badgeColor,
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
+          const SizedBox(height: 8),
+          // Title
+          TranslatedText(
+            category.name,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: _text,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 6),
+          // Topics count
+          Row(
+            children: [
+              const Icon(
+                Icons.library_books_rounded,
+                size: 12,
+                color: Color(0xFF6B7280),
+              ),
+              const SizedBox(width: 3),
+              TranslatedText(
+                '${category.topicsCount}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF6B7280),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Price (if not free)
+          if (planType != 'FREE' && bundlePrice > 0)
+            TranslatedText(
+              '₹${bundlePrice.toStringAsFixed(0)}',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: badgeColor,
+              ),
+            ),
         ],
       ),
     );
@@ -2165,7 +2141,7 @@ class _DashboardState extends State<Dashboard> {
                     _showingSubcats = false;
                     _selectedCategory = null;
                     _activeCategory = 'All';
-                    _currentChips = _categories;
+                    _currentChips = ['All'];
                   }),
                   icon: const Icon(Icons.arrow_back_ios_new, size: 14),
                   label: const TranslatedText("Back"),
