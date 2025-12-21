@@ -1219,8 +1219,8 @@ class FeaturePlansResponse {
   }
 }
 
-class Category {
-  Category({
+class CourseCategory {
+  CourseCategory({
     required this.id,
     required this.name,
     required this.description,
@@ -1244,8 +1244,8 @@ class Category {
   final bool flexiblePurchase;
   final int displayOrder;
 
-  factory Category.fromJson(Map<String, dynamic> json) {
-    return Category(
+  factory CourseCategory.fromJson(Map<String, dynamic> json) {
+    return CourseCategory(
       id: json['id'] as int? ?? 0,
       name: json['name'] as String? ?? '',
       description: json['description'] as String? ?? '',
@@ -1267,7 +1267,7 @@ class CategoriesResponse {
   });
 
   final bool success;
-  final List<Category> data;
+  final List<CourseCategory> data;
 
   factory CategoriesResponse.fromJson(Map<String, dynamic> json) {
     final dataList = json['data'] as List<dynamic>? ?? [];

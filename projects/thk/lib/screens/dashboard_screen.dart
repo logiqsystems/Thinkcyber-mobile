@@ -80,7 +80,7 @@ class _DashboardState extends State<Dashboard> {
   FeaturePlan? _selectedPlan;
   
   // Categories state (API-driven)
-  List<Category> _categories = [];
+  List<CourseCategory> _categories = [];
   bool _categoriesLoading = false;
   late final VoidCallback _wishlistListener;
   final LocalizationService _localizationService = LocalizationService();
@@ -754,7 +754,7 @@ class _DashboardState extends State<Dashboard> {
     );
   }
 
-  Widget _buildCategoryCard(Category category) {
+  Widget _buildCategoryCard(CourseCategory category) {
     final planType = category.planType;
     final bundlePrice = double.tryParse(category.bundlePrice) ?? 0;
     
