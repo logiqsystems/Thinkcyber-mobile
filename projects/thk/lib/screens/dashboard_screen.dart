@@ -7,9 +7,11 @@ import '../services/wishlist_store.dart';
 import '../services/cart_service.dart';
 import '../services/localization_service.dart';
 import '../services/translation_service.dart';
+import '../services/plan_classifier.dart';
 import '../widgets/topic_visuals.dart';
 import '../widgets/translated_text.dart';
 import '../widgets/lottie_loader.dart';
+import '../widgets/plan_display_widget.dart';
 import 'topic_detail_screen.dart';
 import 'cart_screen.dart';
 import 'account_screen.dart';
@@ -73,6 +75,10 @@ class _DashboardState extends State<Dashboard> {
   Map<String, List<String>> _categorySubcats = {};
   bool _showingSubcats = false;
   String? _selectedCategory;
+  
+  // Plan-related state
+  List<FeaturePlan> _plans = [];
+  FeaturePlan? _selectedPlan;
   late final VoidCallback _wishlistListener;
   final LocalizationService _localizationService = LocalizationService();
 
@@ -83,6 +89,7 @@ class _DashboardState extends State<Dashboard> {
     _updateSearchHint();
     _localizationService.addListener(_onLanguageChanged);
     _loadSelectedLanguage(); // Load saved language
+    _loadPlans(); // Load available plans
     _hydrate();
     _wishlistListener = () {
       if (mounted) {
@@ -106,6 +113,19 @@ class _DashboardState extends State<Dashboard> {
   void _onLanguageChanged() {
     print('🔄 Language changed in Dashboard, updating search hint...');
     _updateSearchHint();
+  }
+
+  Future<void> _loadPlans() async {
+    try {
+      final response = await _api.fetchFeaturePlans();
+      if (!mounted) return;
+      
+      setState(() {
+        _plans = response.data;
+      });
+    } catch (e) {
+      debugPrint('Error loading plans: $e');
+    }
   }
 
   Future<void> _updateSearchHint() async {
@@ -629,6 +649,14 @@ class _DashboardState extends State<Dashboard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildHeader(),
+                // Plan Display Widget
+                PlanDisplayWidget(
+                  selectedPlan: _selectedPlan,
+                  onChangePlan: () {
+                    // Navigate to features/plans screen (index 2 in main navigation)
+                    Navigator.of(context).pushNamed('/plans');
+                  },
+                ),
                 if (_isSearching) ...[
                   const SizedBox(height: 12),
                   _buildSearchResults(),

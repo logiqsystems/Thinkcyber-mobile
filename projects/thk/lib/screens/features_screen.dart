@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
+import '../services/plan_classifier.dart';
 import '../widgets/translated_text.dart';
 
 class FeaturesScreen extends StatefulWidget {
@@ -14,6 +15,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
   List<FeaturePlan> _plans = [];
   bool _loading = true;
   String? _error;
+  int? _selectedPlanId;
 
   @override
   void initState() {
@@ -58,7 +60,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const TranslatedText(
-          'Plans & Features',
+          'Learning Plans',
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         centerTitle: true,
@@ -109,11 +111,11 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
                           slivers: [
                             SliverToBoxAdapter(
                               child: Padding(
-                                padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
+                                padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
                                 child: Column(
                                   children: [
                                     const TranslatedText(
-                                      'Choose Your Plan',
+                                      'Choose Your Learning Path',
                                       style: TextStyle(
                                         fontSize: 28,
                                         fontWeight: FontWeight.w800,
@@ -124,9 +126,9 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
                                     ),
                                     const SizedBox(height: 12),
                                     const TranslatedText(
-                                      'Select the perfect plan that suits your learning needs',
+                                      'Select the perfect plan for your learning journey',
                                       style: TextStyle(
-                                        fontSize: 16,
+                                        fontSize: 15,
                                         color: Color(0xFFE0E7FF),
                                         height: 1.5,
                                       ),
@@ -137,14 +139,52 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
                               ),
                             ),
                             SliverPadding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
                               sliver: SliverList(
                                 delegate: SliverChildBuilderDelegate(
                                   (context, index) {
                                     final plan = _plans[index];
-                                    return _buildPlanCard(plan, index);
+                                    final planType = PlanClassifier.classifyPlan(plan);
+                                    final isSelected = _selectedPlanId == plan.id;
+                                    return _buildPlanCard(plan, planType, isSelected);
                                   },
                                   childCount: _plans.length,
+                                ),
+                              ),
+                            ),
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: const EdgeInsets.all(20),
+                                child: Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.9),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: const Color(0xFFE0E7FF),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.info_outline,
+                                        color: const Color(0xFF6366F1),
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: const TranslatedText(
+                                          'Future topics are available only in subscription plans.',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Color(0xFF64748B),
+                                            height: 1.4,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -156,41 +196,44 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
     );
   }
 
-  Widget _buildPlanCard(FeaturePlan plan, int index) {
-    final colors = [
-      const Color(0xFF4F46E5), // Indigo
-      const Color(0xFF0EA5E9), // Sky Blue
-      const Color(0xFF059669), // Emerald
-      const Color(0xFFD97706), // Amber
-    ];
+  Widget _buildPlanCard(FeaturePlan plan, PlanType planType, bool isSelected) {
+    final colors = {
+      PlanType.free: const Color(0xFF10B981),
+      PlanType.bundleOnly: const Color(0xFF0EA5E9),
+      PlanType.flexible: const Color(0xFF4F46E5),
+      PlanType.individualOnly: const Color(0xFFF59E0B),
+    };
 
-    final bgColors = [
-      const Color(0xFFEEF2FF),
-      const Color(0xFFE0F2FE),
-      const Color(0xFFECFDF5),
-      const Color(0xFFFFFBEB),
-    ];
+    final bgColors = {
+      PlanType.free: const Color(0xFFECFDF5),
+      PlanType.bundleOnly: const Color(0xFFE0F2FE),
+      PlanType.flexible: const Color(0xFFEEF2FF),
+      PlanType.individualOnly: const Color(0xFFFEF3C7),
+    };
 
-    final Color cardColor = colors[index % colors.length];
-    final Color bgColor = bgColors[index % bgColors.length];
-
-    final featuresList = plan.features.split('\n').where((f) => f.trim().isNotEmpty).toList();
+    final cardColor = colors[planType]!;
+    final bgColor = bgColors[planType]!;
+    final features = PlanClassifier.getPlanFeatures(plan);
+    final badge = PlanClassifier.getPlanTypeLabel(planType);
+    final hasFutureTopics = PlanClassifier.includesFutureTopics(planType);
+    final canBuyIndividual = PlanClassifier.canBuyIndividual(planType);
+    final canBuyBundle = PlanClassifier.canBuyBundle(planType);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: cardColor.withOpacity(0.1),
-            blurRadius: 24,
+            color: (isSelected ? cardColor : Colors.black).withOpacity(isSelected ? 0.2 : 0.06),
+            blurRadius: 20,
             offset: const Offset(0, 8),
           ),
         ],
         border: Border.all(
-          color: cardColor.withOpacity(0.2),
-          width: 1,
+          color: isSelected ? cardColor : const Color(0xFFE5E7EB),
+          width: isSelected ? 2 : 1,
         ),
       ),
       child: Padding(
@@ -198,168 +241,253 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with icon
+            // Header with badge
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: bgColor,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Icon(
-                    _getPlanIcon(plan.name),
-                    color: cardColor,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TranslatedText(
-                        plan.name,
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: cardColor,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      TranslatedText(
-                        plan.description,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF64748B),
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                  child: TranslatedText(
+                    badge,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: cardColor,
+                    ),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            // Features List
-            TranslatedText(
-              'Includes:',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: const Color(0xFF1E293B),
-              ),
-            ),
-            const SizedBox(height: 12),
-            ...featuresList.map((feature) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                if (isSelected)
                   Container(
-                    margin: const EdgeInsets.only(top: 4),
-                    width: 6,
-                    height: 6,
+                    padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
                       color: cardColor,
-                      borderRadius: BorderRadius.circular(3),
+                      borderRadius: BorderRadius.circular(50),
+                    ),
+                    child: const Icon(
+                      Icons.check,
+                      color: Colors.white,
+                      size: 18,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TranslatedText(
-                      feature.trim(),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Color(0xFF475569),
-                        height: 1.5,
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Plan name and description
+            TranslatedText(
+              plan.name,
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: cardColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TranslatedText(
+              plan.description,
+              style: const TextStyle(
+                fontSize: 14,
+                color: Color(0xFF64748B),
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Features list
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: features
+                  .map((feature) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(top: 2),
+                              padding: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                color: cardColor.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Icon(
+                                Icons.check_small,
+                                color: cardColor,
+                                size: 18,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TranslatedText(
+                                feature,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFF475569),
+                                  height: 1.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ))
+                  .toList(),
+            ),
+
+            // Future topics indicator
+            if (!hasFutureTopics) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6B6B).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: const Color(0xFFFF6B6B).withOpacity(0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.close_small,
+                      color: Color(0xFFFF6B6B),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: const TranslatedText(
+                        'Future topics not included',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFFFF6B6B),
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                    Tooltip(
+                      message: 'This plan does not include access to new topics added in the future',
+                      child: Icon(
+                        Icons.help_outline,
+                        color: const Color(0xFFFF6B6B).withOpacity(0.6),
+                        size: 16,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            )),
+            ],
 
             const SizedBox(height: 20),
 
-            // CTA Button
-            Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [cardColor, cardColor.withOpacity(0.8)],
-                ),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: cardColor.withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
+            // CTA Buttons
+            if (planType == PlanType.flexible) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildCtaButton(
+                      label: 'Buy Topic',
+                      enabled: canBuyIndividual,
+                      color: cardColor,
+                      onTap: canBuyIndividual
+                          ? () => _selectPlan(plan, 'individual')
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildCtaButton(
+                      label: 'Buy Bundle',
+                      enabled: canBuyBundle,
+                      color: cardColor,
+                      variant: 'outline',
+                      onTap: canBuyBundle
+                          ? () => _selectPlan(plan, 'bundle')
+                          : null,
+                    ),
                   ),
                 ],
               ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('${plan.name} selected'),
-                        backgroundColor: cardColor,
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        margin: const EdgeInsets.all(16),
-                      ),
-                    );
-                  },
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        TranslatedText(
-                          'Get Started',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                        SizedBox(width: 8),
-                        Icon(
-                          Icons.arrow_forward_rounded,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+            ] else ...[
+              _buildCtaButton(
+                label: PlanClassifier.getMainCTA(planType),
+                enabled: planType != PlanType.free,
+                color: cardColor,
+                onTap: () => _selectPlan(plan, 'main'),
               ),
-            ),
+            ],
           ],
         ),
       ),
     );
   }
 
-  IconData _getPlanIcon(String planName) {
-    switch (planName.toLowerCase()) {
-      case 'free access':
-        return Icons.card_giftcard_rounded;
-      case 'individual topic plan':
-        return Icons.shopping_cart_rounded;
-      case 'bundle plan':
-        return Icons.inventory_2_rounded;
-      case 'flexible plan':
-        return Icons.tune_rounded;
-      default:
-        return Icons.stars_rounded;
-    }
+  Widget _buildCtaButton({
+    required String label,
+    required bool enabled,
+    required Color color,
+    VoidCallback? onTap,
+    String variant = 'filled',
+  }) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          gradient: enabled
+              ? LinearGradient(colors: [color, color.withOpacity(0.8)])
+              : null,
+          color: enabled ? null : const Color(0xFFE5E7EB),
+          borderRadius: BorderRadius.circular(12),
+          border: variant == 'outline'
+              ? Border.all(
+                  color: enabled ? color : const Color(0xFFD1D5DB),
+                  width: 2,
+                )
+              : null,
+          boxShadow: enabled && variant == 'filled'
+              ? [
+                  BoxShadow(
+                    color: color.withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : null,
+        ),
+        child: Center(
+          child: TranslatedText(
+            label,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: enabled
+                  ? (variant == 'outline' ? color : Colors.white)
+                  : const Color(0xFF9CA3AF),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _selectPlan(FeaturePlan plan, String type) {
+    setState(() {
+      _selectedPlanId = plan.id;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${plan.name} selected ($type)'),
+        backgroundColor: const Color(0xFF6366F1),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
   }
 }
