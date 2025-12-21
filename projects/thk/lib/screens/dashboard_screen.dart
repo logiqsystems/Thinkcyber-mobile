@@ -76,7 +76,7 @@ class _DashboardState extends State<Dashboard> {
   List<String> _currentChips = [];
   Map<String, List<String>> _categorySubcats = {};
   bool _showingSubcats = false;
-  String? _selectedCategory;
+  String? _selectedSubcategoryName;
   
   // Plan-related state
   List<FeaturePlan> _plans = [];
@@ -2171,7 +2171,7 @@ class _DashboardState extends State<Dashboard> {
 
   // 👉 Fixed Categories Layout with Wrap
   Widget _buildCategories() {
-    final isSub = _showingSubcats && _selectedCategory != null;
+    final isSub = _showingSubcats && _selectedSubcategoryName != null;
     final items = _currentChips;
 
     return Padding(
@@ -2184,7 +2184,7 @@ class _DashboardState extends State<Dashboard> {
             children: [
               Flexible(
                 child: TranslatedText(
-                  isSub ? "$_selectedCategory Subcategories" : "Categories",
+                  isSub ? "$_selectedSubcategoryName Subcategories" : "Categories",
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -2197,7 +2197,7 @@ class _DashboardState extends State<Dashboard> {
                 TextButton.icon(
                   onPressed: () => setState(() {
                     _showingSubcats = false;
-                    _selectedCategory = null;
+                    _selectedSubcategoryName = null;
                     _activeCategory = 'All';
                     _currentChips = ['All'];
                   }),
@@ -2222,7 +2222,7 @@ class _DashboardState extends State<Dashboard> {
                           chip != 'All' &&
                           _categorySubcats.containsKey(chip)) {
                         setState(() {
-                          _selectedCategory = chip;
+                          _selectedSubcategoryName = chip;
                           _showingSubcats = true;
                           _currentChips = [
                             'All',
