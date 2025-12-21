@@ -314,7 +314,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Icon(
-                                Icons.check_small,
+                              Icons.check,
                                 color: cardColor,
                                 size: 18,
                               ),
@@ -352,7 +352,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
                 child: Row(
                   children: [
                     const Icon(
-                      Icons.close_small,
+                      Icons.close,
                       color: Color(0xFFFF6B6B),
                       size: 20,
                     ),

@@ -649,31 +649,444 @@ class _DashboardState extends State<Dashboard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildHeader(),
-                // Plan Display Widget
-                PlanDisplayWidget(
-                  selectedPlan: _selectedPlan,
-                  onChangePlan: () {
-                    // Navigate to features/plans screen (index 2 in main navigation)
-                    Navigator.of(context).pushNamed('/plans');
-                  },
-                ),
+                // Plan Banner - Modern Design
+                if (_plans.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                    child: _buildPlanBanner(),
+                  ),
+                // Main Content
                 if (_isSearching) ...[
                   const SizedBox(height: 12),
                   _buildSearchResults(),
                 ]
                 else ...[
                   const SizedBox(height: 12),
-                  _buildCategories(),
-                  const SizedBox(height: 24),
-                  _buildPopularCourses(),
+                  _buildModernCategoriesSection(),
                   const SizedBox(height: 28),
-                  _buildAllTopics(),
+                  _buildModernTopicsGrid(),
                 ],
                 const SizedBox(height: 80),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildModernCategoriesSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TranslatedText(
+            'Categories',
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: _text,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _categories.map((category) {
+                final isActive = _activeCategory == category;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _activeCategory = category;
+                        _showingSubcats = false;
+                        _selectedCategory = null;
+                      });
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isActive ? _accent : Colors.white,
+                        border: Border.all(
+                          color: isActive ? _accent : const Color(0xFFE5E7EB),
+                          width: 1.5,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: isActive
+                            ? [
+                                BoxShadow(
+                                  color: _accent.withOpacity(0.2),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: TranslatedText(
+                        category,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isActive ? Colors.white : _text,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModernTopicsGrid() {
+    if (_isLoading && _topics.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: LottieLoader(
+            width: 120,
+            height: 120,
+          ),
+        ),
+      );
+    }
+
+    if (_errorMessage != null && _topics.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: _ErrorCard(message: _errorMessage!, onRetry: _hydrate),
+      );
+    }
+
+    final filtered = _filteredTopics;
+
+    if (filtered.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: _EmptyCard(onRetry: _hydrate),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TranslatedText(
+                'Available Topics',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: _text,
+                ),
+              ),
+              GestureDetector(
+                onTap: () => _navigateToAllCourses(),
+                child: const TranslatedText(
+                  'View All',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _accent,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 0.75,
+            ),
+            itemCount: filtered.length > 6 ? 6 : filtered.length,
+            itemBuilder: (context, index) {
+              final topic = filtered[index];
+              return _buildModernTopicCard(topic);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModernTopicCard(CourseTopic topic) {
+    final isFree = topic.isFree;
+    
+    return GestureDetector(
+      onTap: () => _navigateToTopic(topic),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Topic Image
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                  ),
+                  color: const Color(0xFFF0F4F8),
+                ),
+                child: Stack(
+                  children: [
+                    TopicImage(
+                      imageUrl: topic.thumbnailUrl,
+                      title: topic.title,
+                      width: double.infinity,
+                      height: double.infinity,
+                    ),
+                    if (isFree)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const TranslatedText(
+                            'Free',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF4F46E5),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: TranslatedText(
+                            '₹${topic.price.toStringAsFixed(0)}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            // Card Content
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TranslatedText(
+                    topic.title,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _text,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  TranslatedText(
+                    topic.categoryName,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: _muted,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Progress or enrollment status
+                  if (topic.isEnrolled)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const TranslatedText(
+                        'Enrolled',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF10B981),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlanBanner() {
+    if (_plans.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              const Color(0xFF6366F1),
+              const Color(0xFF4F46E5),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            TranslatedText(
+              'Select Your Learning Plan',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+            SizedBox(height: 8),
+            TranslatedText(
+              'Choose a plan to access topics and courses',
+              style: TextStyle(
+                fontSize: 14,
+                color: Color(0xFFE0E7FF),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Show random plan or featured plan
+    final planToShow = _selectedPlan ?? _plans.first;
+    final planType = PlanClassifier.classifyPlan(planToShow);
+    
+    final colors = {
+      PlanType.free: const Color(0xFF10B981),
+      PlanType.bundleOnly: const Color(0xFF0EA5E9),
+      PlanType.flexible: const Color(0xFF6366F1),
+      PlanType.individualOnly: const Color(0xFFF59E0B),
+    };
+
+    final cardColor = colors[planType]!;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            cardColor,
+            cardColor.withOpacity(0.7),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: cardColor.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: TranslatedText(
+                    _selectedPlan != null ? 'Current Plan' : 'Featured Plan',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TranslatedText(
+                  planToShow.name,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TranslatedText(
+                  planToShow.description,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.white70,
+                    height: 1.5,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.arrow_forward_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+        ],
       ),
     );
   }
