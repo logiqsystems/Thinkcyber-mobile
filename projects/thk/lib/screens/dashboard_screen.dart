@@ -70,7 +70,6 @@ class _DashboardState extends State<Dashboard> {
   String _selectedLanguage = 'English'; // Track selected language
   String _searchHint = 'Search topics, categories...';
 
-  List<String> _categories = [];
   List<String> _currentChips = [];
   Map<String, List<String>> _categorySubcats = {};
   bool _showingSubcats = false;
@@ -79,6 +78,10 @@ class _DashboardState extends State<Dashboard> {
   // Plan-related state
   List<FeaturePlan> _plans = [];
   FeaturePlan? _selectedPlan;
+  
+  // Categories state (API-driven)
+  List<Category> _categories = [];
+  bool _categoriesLoading = false;
   late final VoidCallback _wishlistListener;
   final LocalizationService _localizationService = LocalizationService();
 
@@ -90,6 +93,7 @@ class _DashboardState extends State<Dashboard> {
     _localizationService.addListener(_onLanguageChanged);
     _loadSelectedLanguage(); // Load saved language
     _loadPlans(); // Load available plans
+    _loadCategoriesData(); // Load categories
     _hydrate();
     _wishlistListener = () {
       if (mounted) {
@@ -125,6 +129,29 @@ class _DashboardState extends State<Dashboard> {
       });
     } catch (e) {
       debugPrint('Error loading plans: $e');
+    }
+  }
+
+  Future<void> _loadCategoriesData() async {
+    if (!mounted) return;
+    setState(() => _categoriesLoading = true);
+    
+    try {
+      final response = await _api.fetchCategories();
+      if (!mounted) return;
+      
+      // Sort by display_order
+      final sorted = response.data;
+      sorted.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
+      
+      setState(() {
+        _categories = sorted;
+        _categoriesLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _categoriesLoading = false);
+      debugPrint('Error loading categories: $e');
     }
   }
 
@@ -636,6 +663,7 @@ class _DashboardState extends State<Dashboard> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _background,
@@ -649,12 +677,6 @@ class _DashboardState extends State<Dashboard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildHeader(),
-                // Plan Banner - Modern Design
-                if (_plans.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                    child: _buildPlanBanner(),
-                  ),
                 // Main Content
                 if (_isSearching) ...[
                   const SizedBox(height: 12),
@@ -662,7 +684,7 @@ class _DashboardState extends State<Dashboard> {
                 ]
                 else ...[
                   const SizedBox(height: 12),
-                  _buildModernCategoriesSection(),
+                  _buildCategoriesSection(),
                   const SizedBox(height: 28),
                   _buildModernTopicsGrid(),
                 ],
@@ -675,67 +697,220 @@ class _DashboardState extends State<Dashboard> {
     );
   }
 
-  Widget _buildModernCategoriesSection() {
+  Widget _buildCategoriesSection() {
+    if (_categoriesLoading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    if (_categories.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+          ),
+          child: const Center(
+            child: TranslatedText(
+              'No categories available',
+              style: TextStyle(color: Color(0xFF6B7280)),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TranslatedText(
-            'Categories',
+            'Learning Plans & Bundles',
             style: const TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
               color: _text,
             ),
           ),
-          const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: _categories.map((category) {
-                final isActive = _activeCategory == category;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _activeCategory = category;
-                        _showingSubcats = false;
-                        _selectedCategory = null;
-                      });
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: isActive ? _accent : Colors.white,
-                        border: Border.all(
-                          color: isActive ? _accent : const Color(0xFFE5E7EB),
-                          width: 1.5,
+          const SizedBox(height: 14),
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _categories.length,
+            itemBuilder: (context, index) {
+              return _buildCategoryCard(_categories[index]);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryCard(Category category) {
+    final planType = category.planType;
+    final bundlePrice = double.tryParse(category.bundlePrice) ?? 0;
+    
+    // Color based on plan type
+    final colors = {
+      'FREE': const Color(0xFF10B981),
+      'BUNDLE': const Color(0xFFF59E0B),
+      'FLEXIBLE': const Color(0xFF6366F1),
+    };
+
+    final badgeColors = {
+      'FREE': const Color(0xFFDCFCE7),
+      'BUNDLE': const Color(0xFFFEF3C7),
+      'FLEXIBLE': const Color(0xFFEEF2FF),
+    };
+
+    final badgeColor = colors[planType] ?? const Color(0xFF6366F1);
+    final bgColor = badgeColors[planType] ?? const Color(0xFFEEF2FF);
+
+    IconData getPlanIcon() {
+      switch (planType) {
+        case 'FREE':
+          return Icons.card_giftcard_rounded;
+        case 'BUNDLE':
+          return Icons.inventory_2_rounded;
+        case 'FLEXIBLE':
+          return Icons.tune_rounded;
+        default:
+          return Icons.star_rounded;
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFE5E7EB),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Icon
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              getPlanIcon(),
+              color: badgeColor,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 14),
+          // Content
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Title and Badge
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TranslatedText(
+                        category.name,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: _text,
                         ),
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: isActive
-                            ? [
-                                BoxShadow(
-                                  color: _accent.withOpacity(0.2),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ]
-                            : null,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: bgColor,
+                        borderRadius: BorderRadius.circular(6),
                       ),
                       child: TranslatedText(
-                        category,
+                        planType,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: isActive ? Colors.white : _text,
+                          color: badgeColor,
                         ),
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // Description
+                TranslatedText(
+                  category.description,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF6B7280),
+                    height: 1.4,
                   ),
-                );
-              }).toList(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 10),
+                // Bottom row: Topics count and Price
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.library_books_rounded,
+                          size: 14,
+                          color: Color(0xFF6B7280),
+                        ),
+                        const SizedBox(width: 4),
+                        TranslatedText(
+                          '${category.topicsCount} topics',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF6B7280),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (planType != 'FREE' && bundlePrice > 0)
+                      TranslatedText(
+                        '₹${bundlePrice.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: badgeColor,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ),
           ),
         ],

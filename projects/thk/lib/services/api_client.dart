@@ -341,6 +341,13 @@ class ThinkCyberApi {
     return FeaturePlansResponse.fromJson(json);
   }
 
+  /// Fetch categories/bundles
+  Future<CategoriesResponse> fetchCategories() async {
+    final endpoint = '/categories';
+    final json = await _getJson(endpoint);
+    return CategoriesResponse.fromJson(json);
+  }
+
   void dispose() {
     _client.close();
   }
@@ -1207,6 +1214,67 @@ class FeaturePlansResponse {
       success: json['success'] as bool? ?? false,
       data: dataList
           .map((item) => FeaturePlan.fromJson(item as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class Category {
+  Category({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.topicsCount,
+    required this.planType,
+    required this.bundlePrice,
+    required this.price,
+    required this.futureTopicsIncluded,
+    required this.flexiblePurchase,
+    required this.displayOrder,
+  });
+
+  final int id;
+  final String name;
+  final String description;
+  final int topicsCount;
+  final String planType;
+  final String bundlePrice;
+  final String? price;
+  final bool futureTopicsIncluded;
+  final bool flexiblePurchase;
+  final int displayOrder;
+
+  factory Category.fromJson(Map<String, dynamic> json) {
+    return Category(
+      id: json['id'] as int? ?? 0,
+      name: json['name'] as String? ?? '',
+      description: json['description'] as String? ?? '',
+      topicsCount: json['topics_count'] as int? ?? 0,
+      planType: json['plan_type'] as String? ?? 'FLEXIBLE',
+      bundlePrice: json['bundle_price'] as String? ?? '0.00',
+      price: json['price'] as String?,
+      futureTopicsIncluded: json['future_topics_included'] as bool? ?? false,
+      flexiblePurchase: json['flexible_purchase'] as bool? ?? false,
+      displayOrder: json['display_order'] as int? ?? 0,
+    );
+  }
+}
+
+class CategoriesResponse {
+  CategoriesResponse({
+    required this.success,
+    required this.data,
+  });
+
+  final bool success;
+  final List<Category> data;
+
+  factory CategoriesResponse.fromJson(Map<String, dynamic> json) {
+    final dataList = json['data'] as List<dynamic>? ?? [];
+    return CategoriesResponse(
+      success: json['success'] as bool? ?? false,
+      data: dataList
+          .map((item) => Category.fromJson(item as Map<String, dynamic>))
           .toList(),
     );
   }
