@@ -714,7 +714,7 @@ class _DashboardState extends State<Dashboard> {
       return const Padding(
         padding: EdgeInsets.symmetric(horizontal: 16),
         child: SizedBox(
-          height: 100,
+          height: 200,
           child: Center(child: CircularProgressIndicator()),
         ),
       );
@@ -724,7 +724,7 @@ class _DashboardState extends State<Dashboard> {
       return const Padding(
         padding: EdgeInsets.symmetric(horizontal: 16),
         child: SizedBox(
-          height: 80,
+          height: 150,
           child: Center(
             child: TranslatedText(
               'No categories available',
@@ -749,22 +749,24 @@ class _DashboardState extends State<Dashboard> {
             ),
           ),
           const SizedBox(height: 12),
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _categories.length,
-            itemBuilder: (context, index) {
-              final category = _categories[index];
-              final isSelected = _selectedCategory?.id == category.id;
-              return _buildCategoryCardWithExpand(category, isSelected);
-            },
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _categories.map((category) {
+                final isSelected = _selectedCategory?.id == category.id;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: _buildCategoryCardHorizontal(category, isSelected),
+                );
+              }).toList(),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCategoryCardWithExpand(CourseCategory category, bool isSelected) {
+  Widget _buildCategoryCardHorizontal(CourseCategory category, bool isSelected) {
     final planType = category.planType;
     final bundlePrice = double.tryParse(category.bundlePrice) ?? 0;
     
@@ -811,7 +813,7 @@ class _DashboardState extends State<Dashboard> {
         });
       },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
+        width: 280,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
@@ -834,119 +836,109 @@ class _DashboardState extends State<Dashboard> {
               ),
           ],
         ),
-        child: Column(
-          children: [
-            // Main card content
-            Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header: Icon and Badge
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   // Icon
                   Container(
-                    width: 50,
-                    height: 50,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: lightColor,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: Center(
                       child: Icon(
                         getPlanIcon(),
                         color: primaryColor,
-                        size: 28,
+                        size: 26,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  // Content
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  TranslatedText(
-                                    category.name,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF1F2937),
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.library_books_rounded,
-                                        size: 13,
-                                        color: primaryColor.withOpacity(0.7),
-                                      ),
-                                      const SizedBox(width: 3),
-                                      TranslatedText(
-                                        '${category.topicsCount} topics',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Color(0xFF6B7280),
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: lightColor,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: TranslatedText(
-                                    planType,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: primaryColor,
-                                      letterSpacing: 0.3,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                if (planType != 'FREE' && bundlePrice > 0)
-                                  TranslatedText(
-                                    '₹${bundlePrice.toStringAsFixed(2)}',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      color: primaryColor,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
+                  // Badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: lightColor,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: TranslatedText(
+                      planType,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: primaryColor,
+                        letterSpacing: 0.3,
+                      ),
                     ),
                   ),
                 ],
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              // Title
+              TranslatedText(
+                category.name,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1F2937),
+                  height: 1.3,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 8),
+              // Topics count
+              Row(
+                children: [
+                  Icon(
+                    Icons.library_books_rounded,
+                    size: 13,
+                    color: primaryColor.withOpacity(0.7),
+                  ),
+                  const SizedBox(width: 4),
+                  TranslatedText(
+                    '${category.topicsCount} topics',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF6B7280),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // Price
+              if (planType != 'FREE' && bundlePrice > 0)
+                TranslatedText(
+                  '₹${bundlePrice.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: primaryColor,
+                  ),
+                )
+              else if (planType == 'FREE')
+                TranslatedText(
+                  'Free',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: primaryColor,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
