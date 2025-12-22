@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+**/build/
 
 # Symbolication related
 app.*.symbols
@@ -43,3 +44,50 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Parent directory files (Docker setup, other projects)
+../../*
+../*
+
+# Generated files
+*.g.dart
+*.freezed.dart
+*.gr.dart
+
+# iOS specific
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+
+# Android specific  
+**/android/.gradle/
+**/android/local.properties
+**/android/key.properties
+**/android/*.keystore
+**/android/app/build/
+**/android/build/
+
+# macOS specific
+**/macos/Pods/
+**/macos/Flutter/ephemeral/
+
+# Windows specific
+**/windows/flutter/ephemeral/
+
+# Linux specific
+**/linux/flutter/ephemeral/
+
+# Web specific
+**/web/favicon.png
+
+# Lock files (optional - uncomment if you don't want to track)
+# pubspec.lock
+
+# Store assets and temp files
+store_assets/
+original/
+temp_*.dart
+*.md.bak

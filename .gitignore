@@ -1,0 +1,60 @@
+# Docker and shell scripts (not needed in Flutter app repo)
+Dockerfile
+docker-compose.yml
+*.sh
+*.bat
+flutter-new.code-workspace
+
+# VS Code settings
+.vscode/
+
+# Other projects (only track thk project)
+projects/assets/
+projects/plant_disease_app/
+
+# Flutter/Dart common ignores
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/build/
+**/.pub-cache/
+**/.pub/
+**/doc/api/
+
+# IDE
+**/*.iml
+**/*.ipr
+**/*.iws
+**/.idea/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Generated
+**/*.g.dart
+**/*.freezed.dart
+
+# iOS
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+
+# Android
+**/.gradle/
+**/local.properties
+**/key.properties
+**/*.keystore
+**/android/app/build/
+**/android/build/
+
+# Platform ephemeral
+**/macos/Flutter/ephemeral/
+**/windows/flutter/ephemeral/
+**/linux/flutter/ephemeral/
+
+# Temp files
+**/temp_*.dart
+**/original/
+**/store_assets/
