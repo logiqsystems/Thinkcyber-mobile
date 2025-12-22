@@ -8,13 +8,9 @@ import 'config/api_config.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Set preferred orientations for the app (allow all by default)
-  // Individual screens can override this as needed
+  // Lock app to portrait orientation only
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
   ]);
   
   // Log API configuration at startup

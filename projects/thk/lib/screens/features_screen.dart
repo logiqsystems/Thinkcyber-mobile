@@ -152,42 +152,6 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
                                 ),
                               ),
                             ),
-                            SliverToBoxAdapter(
-                              child: Padding(
-                                padding: const EdgeInsets.all(20),
-                                child: Container(
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.9),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: const Color(0xFFE0E7FF),
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.info_outline,
-                                        color: const Color(0xFF6366F1),
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: const TranslatedText(
-                                          'Future topics are available only in subscription plans.',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Color(0xFF64748B),
-                                            height: 1.4,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
                             const SliverPadding(padding: EdgeInsets.only(bottom: 40)),
                           ],
                         ),
@@ -336,88 +300,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
                   .toList(),
             ),
 
-            // Future topics indicator
-            if (!hasFutureTopics) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B6B).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: const Color(0xFFFF6B6B).withOpacity(0.3),
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.close,
-                      color: Color(0xFFFF6B6B),
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: const TranslatedText(
-                        'Future topics not included',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFFFF6B6B),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    Tooltip(
-                      message: 'This plan does not include access to new topics added in the future',
-                      child: Icon(
-                        Icons.help_outline,
-                        color: const Color(0xFFFF6B6B).withOpacity(0.6),
-                        size: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
             const SizedBox(height: 20),
-
-            // CTA Buttons
-            if (planType == PlanType.flexible) ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildCtaButton(
-                      label: 'Buy Topic',
-                      enabled: canBuyIndividual,
-                      color: cardColor,
-                      onTap: canBuyIndividual
-                          ? () => _selectPlan(plan, 'individual')
-                          : null,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildCtaButton(
-                      label: 'Buy Bundle',
-                      enabled: canBuyBundle,
-                      color: cardColor,
-                      variant: 'outline',
-                      onTap: canBuyBundle
-                          ? () => _selectPlan(plan, 'bundle')
-                          : null,
-                    ),
-                  ),
-                ],
-              ),
-            ] else ...[
-              _buildCtaButton(
-                label: PlanClassifier.getMainCTA(planType),
-                enabled: planType != PlanType.free,
-                color: cardColor,
-                onTap: () => _selectPlan(plan, 'main'),
-              ),
-            ],
           ],
         ),
       ),

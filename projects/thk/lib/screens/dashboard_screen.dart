@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'dart:convert';
 
 import '../services/api_client.dart';
 import '../services/wishlist_store.dart';
@@ -8,11 +10,13 @@ import '../services/cart_service.dart';
 import '../services/localization_service.dart';
 import '../services/translation_service.dart';
 import '../services/plan_classifier.dart';
+import '../config/razorpay_config.dart';
 import '../widgets/topic_visuals.dart';
 import '../widgets/translated_text.dart';
 import '../widgets/lottie_loader.dart';
 import '../widgets/plan_display_widget.dart';
 import 'topic_detail_screen.dart';
+import 'bundle_topics_detail_screen.dart';
 import 'cart_screen.dart';
 import 'account_screen.dart';
 import 'notification_screen.dart';
@@ -72,6 +76,11 @@ class _DashboardState extends State<Dashboard> {
 
   // Selected category for filtering
   CourseCategory? _selectedCategory;
+  
+  // Pagination state
+  int _currentPage = 0;
+  static const int _topicsPerPage = 6;
+  int _swipeDirection = 1; // 1 for right/next, -1 for left/previous
 
   List<String> _currentChips = [];
   Map<String, List<String>> _categorySubcats = {};
@@ -87,6 +96,17 @@ class _DashboardState extends State<Dashboard> {
   bool _categoriesLoading = false;
   late final VoidCallback _wishlistListener;
   final LocalizationService _localizationService = LocalizationService();
+  
+  // Track purchased bundles (categoryId -> true)
+  Set<int> _purchasedBundleCategoryIds = {};
+
+  // Razorpay for bundle purchase
+  late Razorpay _razorpay;
+  String? _currentBundleOrderId;
+  int? _currentBundleCategoryId;
+  bool _processingBundlePurchase = false;
+  int? _userId;
+  String? _userEmail2;
 
   @override
   void initState() {
@@ -105,6 +125,15 @@ class _DashboardState extends State<Dashboard> {
     };
     _wishlist.addListener(_wishlistListener);
     _wishlist.hydrate();
+    
+    // Initialize Razorpay
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handleBundlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handleBundlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleBundleExternalWallet);
+    
+    // Load user info for payment
+    _loadUserInfo();
   }
 
   @override
@@ -114,7 +143,53 @@ class _DashboardState extends State<Dashboard> {
     _localizationService.removeListener(_onLanguageChanged);
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _razorpay.clear();
     super.dispose();
+  }
+  
+  Future<void> _loadUserInfo() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rawUser = prefs.getString('thinkcyber_user');
+    if (rawUser != null && rawUser.isNotEmpty) {
+      try {
+        final json = jsonDecode(rawUser);
+        if (json is Map<String, dynamic>) {
+          _userId = json['id'] as int?;
+          _userEmail2 = json['email'] as String?;
+        }
+      } catch (_) {}
+    }
+    _userId ??= prefs.getInt('thinkcyber_user_id');
+    _userEmail2 ??= prefs.getString('thinkcyber_email');
+    
+    // Load user's purchased bundles
+    if (_userId != null) {
+      _loadUserBundles();
+    }
+  }
+  
+  Future<void> _loadUserBundles() async {
+    if (_userId == null) return;
+    
+    try {
+      final bundles = await _api.fetchUserBundles(userId: _userId!);
+      if (!mounted) return;
+      
+      final purchasedCategoryIds = <int>{};
+      for (final bundle in bundles) {
+        if (bundle.categoryId != null) {
+          purchasedCategoryIds.add(bundle.categoryId!);
+        }
+      }
+      
+      setState(() {
+        _purchasedBundleCategoryIds = purchasedCategoryIds;
+      });
+      
+      debugPrint('✅ Loaded ${purchasedCategoryIds.length} purchased bundles: $purchasedCategoryIds');
+    } catch (e) {
+      debugPrint('Error loading user bundles: $e');
+    }
   }
 
   void _onLanguageChanged() {
@@ -700,7 +775,7 @@ class _DashboardState extends State<Dashboard> {
                   const SizedBox(height: 28),
                   _buildModernTopicsGrid(),
                 ],
-                const SizedBox(height: 80),
+                const SizedBox(height: 30),
               ],
             ),
           ),
@@ -741,9 +816,9 @@ class _DashboardState extends State<Dashboard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TranslatedText(
-            'Learning Plans & Bundles',
+            'Categories',
             style: const TextStyle(
-              fontSize: 16,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
               color: _text,
             ),
@@ -770,6 +845,11 @@ class _DashboardState extends State<Dashboard> {
     final planType = category.planType;
     final bundlePrice = double.tryParse(category.bundlePrice) ?? 0;
     
+    // Calculate actual topic count from loaded topics
+    final actualTopicCount = _topics
+        .where((t) => t.categoryName == category.name)
+        .length;
+    
     final colorMap = {
       'FREE': {
         'primary': const Color(0xFF10B981),
@@ -794,11 +874,24 @@ class _DashboardState extends State<Dashboard> {
         case 'FREE':
           return Icons.card_giftcard_rounded;
         case 'BUNDLE':
-          return Icons.inventory_2_rounded;
+          return Icons.card_giftcard_rounded;
         case 'FLEXIBLE':
           return Icons.tune_rounded;
         default:
           return Icons.star_rounded;
+      }
+    }
+
+    String getPlanType() {
+      switch (planType) {
+        case 'FREE':
+          return 'FREE';
+        case 'BUNDLE':
+          return 'BUNDLE';
+        case 'FLEXIBLE':
+          return 'FLEXIBLE';
+        default:
+          return 'PLAN';
       }
     }
 
@@ -809,14 +902,15 @@ class _DashboardState extends State<Dashboard> {
             _selectedCategory = null;
           } else {
             _selectedCategory = category;
+            _currentPage = 0; // Reset to first page when category changes
           }
         });
       },
       child: Container(
-        width: 280,
+        width: 260,
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? primaryColor : const Color(0xFFE5E7EB),
             width: isSelected ? 2 : 1,
@@ -825,8 +919,8 @@ class _DashboardState extends State<Dashboard> {
             if (isSelected)
               BoxShadow(
                 color: primaryColor.withOpacity(0.15),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               )
             else
               BoxShadow(
@@ -837,106 +931,112 @@ class _DashboardState extends State<Dashboard> {
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(12),
           child: Column(
+            mainAxisSize: MainAxisSize.max,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header: Icon and Badge
+              // Icon, Title, Topics, and Price in Row
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   // Icon
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 42,
+                    height: 42,
                     decoration: BoxDecoration(
                       color: lightColor,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(9),
                     ),
                     child: Center(
                       child: Icon(
                         getPlanIcon(),
                         color: primaryColor,
-                        size: 26,
+                        size: 24,
                       ),
                     ),
                   ),
-                  // Badge
+                  const SizedBox(width: 10),
+                  // Title and Topics
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Plan Type Badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: primaryColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: TranslatedText(
+                            getPlanType(),
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: primaryColor,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        TranslatedText(
+                          category.name,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1F2937),
+                            height: 1.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        // Topics count inline
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.library_books_rounded,
+                              size: 12,
+                              color: primaryColor.withOpacity(0.7),
+                            ),
+                            const SizedBox(width: 4),
+                            TranslatedText(
+                              '$actualTopicCount topics',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF6B7280),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Price or Free on the right
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
+                      horizontal: 6,
+                      vertical: 3,
                     ),
                     decoration: BoxDecoration(
                       color: lightColor,
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(5),
                     ),
                     child: TranslatedText(
-                      planType,
+                      bundlePrice > 0 ? '₹${bundlePrice.toStringAsFixed(0)}' : 'Free',
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 10,
                         fontWeight: FontWeight.w700,
                         color: primaryColor,
-                        letterSpacing: 0.3,
+                        letterSpacing: 0.2,
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              // Title
-              TranslatedText(
-                category.name,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1F2937),
-                  height: 1.3,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 8),
-              // Topics count
-              Row(
-                children: [
-                  Icon(
-                    Icons.library_books_rounded,
-                    size: 13,
-                    color: primaryColor.withOpacity(0.7),
-                  ),
-                  const SizedBox(width: 4),
-                  TranslatedText(
-                    '${category.topicsCount} topics',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF6B7280),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              // Price
-              if (planType != 'FREE' && bundlePrice > 0)
-                TranslatedText(
-                  '₹${bundlePrice.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: primaryColor,
-                  ),
-                )
-              else if (planType == 'FREE')
-                TranslatedText(
-                  'Free',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: primaryColor,
-                  ),
-                ),
             ],
           ),
         ),
@@ -978,6 +1078,12 @@ class _DashboardState extends State<Dashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Bundle Purchase Section - Show when category is selected
+          if (_selectedCategory != null) ...[
+            _buildBundlePurchaseSection(),
+            const SizedBox(height: 24),
+          ],
+          
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1003,20 +1109,129 @@ class _DashboardState extends State<Dashboard> {
             ],
           ),
           const SizedBox(height: 14),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 0.75,
-            ),
-            itemCount: filtered.length > 6 ? 6 : filtered.length,
-            itemBuilder: (context, index) {
-              final topic = filtered[index];
-              return _buildModernTopicCard(topic);
+          // Calculate pagination
+          Builder(
+            builder: (context) {
+              final totalPages = (filtered.length / _topicsPerPage).ceil();
+              final startIndex = _currentPage * _topicsPerPage;
+              final endIndex = (startIndex + _topicsPerPage).clamp(0, filtered.length);
+              final pageTopics = filtered.sublist(startIndex, endIndex);
+              
+              return Column(
+                children: [
+                  // Pagination dots at top
+                  if (totalPages > 1) ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(totalPages, (index) {
+                        final isActive = _currentPage == index;
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _currentPage = index;
+                            });
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            width: isActive ? 32 : 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: isActive
+                                  ? _accent
+                                  : const Color(0xFFD1D5DB),
+                              borderRadius: BorderRadius.circular(4),
+                              boxShadow: isActive
+                                  ? [
+                                      BoxShadow(
+                                        color: _accent.withOpacity(0.4),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ]
+                                  : [],
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 4),
+                    // Page counter text
+                    TranslatedText(
+                      'Page ${_currentPage + 1} of $totalPages',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF9CA3AF),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // Swipeable grid with smooth animation
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 700),
+                    transitionBuilder: (child, animation) {
+                      // Animate based on swipe direction
+                      final beginOffset = _swipeDirection > 0 
+                        ? const Offset(1, 0)    // Swipe left (next): slide from right
+                        : const Offset(-1, 0);  // Swipe right (previous): slide from left
+                      
+                      return SlideTransition(
+                        position: Tween<Offset>(
+                          begin: beginOffset,
+                          end: Offset.zero,
+                        ).animate(
+                          CurvedAnimation(parent: animation, curve: Curves.easeInOut),
+                        ),
+                        child: FadeTransition(
+                          opacity: animation,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: GestureDetector(
+                      key: ValueKey<int>(_currentPage),
+                      onHorizontalDragEnd: (DragEndDetails details) {
+                        // Swipe right to previous page
+                        if (details.primaryVelocity! > 0) {
+                          if (_currentPage > 0) {
+                            setState(() {
+                              _swipeDirection = -1; // Swiping right (previous)
+                              _currentPage--;
+                            });
+                          }
+                        }
+                        // Swipe left to next page
+                        else if (details.primaryVelocity! < 0) {
+                          if (_currentPage < totalPages - 1) {
+                            setState(() {
+                              _swipeDirection = 1; // Swiping left (next)
+                              _currentPage++;
+                            });
+                          }
+                        }
+                      },
+                      child: GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: EdgeInsets.zero,
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          childAspectRatio: 0.75,
+                        ),
+                        itemCount: pageTopics.length,
+                        itemBuilder: (context, index) {
+                          final topic = pageTopics[index];
+                          return _buildModernTopicCard(topic);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              );
             },
           ),
         ],
@@ -1024,8 +1239,610 @@ class _DashboardState extends State<Dashboard> {
     );
   }
 
+  Widget _buildBundlePurchaseSection() {
+    if (_selectedCategory == null) return const SizedBox.shrink();
+    
+    final planType = _selectedCategory!.planType;
+    
+    // Only show bundle section for BUNDLE and FLEXIBLE plans
+    if (planType == 'FREE' || planType == 'INDIVIDUAL') {
+      return const SizedBox.shrink();
+    }
+    
+    // Get the bundle price for this category - handle String to double conversion
+    final bundlePrice = double.tryParse(_selectedCategory!.bundlePrice?.toString() ?? '0') ?? 0.0;
+    // Calculate actual topic count from loaded topics
+    final topicsCount = _topics
+        .where((t) => t.categoryName == _selectedCategory!.name)
+        .length;
+    
+    // Get category icon/emoji
+    final categoryIconEmoji = _getCategoryEmoji(_selectedCategory!.name);
+    
+    // Check if bundle is already purchased
+    final isBundlePurchased = _purchasedBundleCategoryIds.contains(_selectedCategory!.id);
+    
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFFF0F4FF),
+            const Color(0xFFE8EEFF),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFE0E7FF),
+          width: 1,
+        ),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header with category icon and name
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFFE0E7FF),
+                    width: 1,
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    categoryIconEmoji,
+                    style: const TextStyle(fontSize: 28),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TranslatedText(
+                      _selectedCategory!.name,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1F2937),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        if (planType == 'BUNDLE') ...[
+                          const Icon(
+                            Icons.card_giftcard_rounded,
+                            size: 16,
+                            color: Color(0xFFF59E0B),
+                          ),
+                          const SizedBox(width: 4),
+                          TranslatedText(
+                            'Bundle Package',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFF59E0B),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ] else ...[
+                          const Icon(
+                            Icons.tune_rounded,
+                            size: 16,
+                            color: Color(0xFF6366F1),
+                          ),
+                          const SizedBox(width: 4),
+                          TranslatedText(
+                            'Flexible Package',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF6366F1),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        TranslatedText(
+                          'Access all $topicsCount topics',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF6B7280),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Price info row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              if (bundlePrice > 0 && !isBundlePurchased) ...[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TranslatedText(
+                        'Bundle Price',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF6B7280),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      TranslatedText(
+                        '₹${bundlePrice.toStringAsFixed(0)}',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0D6EFD),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      TranslatedText(
+                        'for all $topicsCount topics = ₹${(bundlePrice / topicsCount).toStringAsFixed(0)}/topic',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF9CA3AF),
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ] else if (isBundlePurchased) ...[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.check_circle_rounded,
+                                  size: 14,
+                                  color: Color(0xFF10B981),
+                                ),
+                                SizedBox(width: 4),
+                                TranslatedText(
+                                  'Purchased',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF10B981),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      TranslatedText(
+                        'You have access to all $topicsCount topics',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF6B7280),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              // Buy Bundle or View Topics Button
+              GestureDetector(
+                onTap: () {
+                  if (isBundlePurchased) {
+                    // Navigate to bundle topics
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => BundleTopicsDetailScreen(
+                          categoryId: _selectedCategory!.id,
+                          categoryName: _selectedCategory!.name,
+                          userId: _userId ?? 0,
+                        ),
+                      ),
+                    );
+                  } else {
+                    // Show purchase dialog
+                    _showBundlePurchaseDialog();
+                  }
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: isBundlePurchased
+                          ? [const Color(0xFF10B981), const Color(0xFF059669)]
+                          : [const Color(0xFF0D6EFD), const Color(0xFF0853E8)],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isBundlePurchased 
+                            ? const Color(0xFF10B981) 
+                            : const Color(0xFF0D6EFD)).withOpacity(0.3),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isBundlePurchased 
+                            ? Icons.play_circle_outline_rounded
+                            : Icons.shopping_bag_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      TranslatedText(
+                        isBundlePurchased ? 'View Topics' : 'Buy Bundle',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showBundlePurchaseDialog() {
+    if (_selectedCategory == null) return;
+    
+    final planType = _selectedCategory!.planType;
+    final includeFutureTopics = planType == 'BUNDLE'; // Only BUNDLE includes future topics
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: TranslatedText(
+          'Purchase ${_selectedCategory!.name} Bundle?',
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TranslatedText(
+              'You will get instant access to:',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1F2937),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF10B981),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TranslatedText(
+                    'All ${_selectedCategory!.topicsCount} topics in this category',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF6B7280),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  includeFutureTopics ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                  color: includeFutureTopics ? const Color(0xFF10B981) : const Color(0xFFFCA5A5),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TranslatedText(
+                    'Future topics added to this category',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: includeFutureTopics ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF10B981),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TranslatedText(
+                    'Annual access to all materials',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF6B7280),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const TranslatedText('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0D6EFD),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            onPressed: _processingBundlePurchase ? null : () {
+              Navigator.pop(context);
+              // Start bundle purchase with Razorpay
+              _startBundlePurchase();
+            },
+            child: _processingBundlePurchase 
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
+              : const TranslatedText(
+                  'Confirm Purchase',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Future<void> _startBundlePurchase() async {
+    if (_selectedCategory == null || _userId == null || _userEmail2 == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: TranslatedText('Please login to purchase')),
+      );
+      return;
+    }
+    
+    setState(() => _processingBundlePurchase = true);
+    
+    try {
+      debugPrint('✅ Razorpay | Creating bundle order...');
+      
+      // Create order via backend
+      final orderData = await _api.createOrderForBundle(
+        userId: _userId!,
+        categoryId: _selectedCategory!.id,
+        email: _userEmail2!,
+      );
+      
+      final orderId = orderData['orderId'] as String?;
+      final keyId = orderData['keyId'] as String?;
+      final amount = orderData['amount'] as num?;
+      
+      if (orderId == null || keyId == null) {
+        throw Exception('Invalid order response from backend');
+      }
+      
+      debugPrint('✅ Razorpay | Bundle order created: $orderId');
+      
+      // Store for verification
+      _currentBundleOrderId = orderId;
+      _currentBundleCategoryId = _selectedCategory!.id;
+      
+      // Get bundle price
+      final bundlePrice = double.tryParse(_selectedCategory!.bundlePrice?.toString() ?? '0') ?? 0.0;
+      final amountInPaise = amount ?? (bundlePrice * 100).toInt();
+      
+      // Open Razorpay
+      var options = {
+        'key': keyId,
+        'amount': amountInPaise,
+        'name': RazorpayConfig.merchantName,
+        'description': '${_selectedCategory!.name} Bundle',
+        'order_id': orderId,
+        'prefill': {
+          'contact': '',
+          'email': _userEmail2,
+        },
+        'external': {
+          'wallets': RazorpayConfig.supportedWallets,
+        }
+      };
+      
+      _razorpay.open(options);
+    } catch (e) {
+      debugPrint('❌ Razorpay | Error creating bundle order: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+        setState(() => _processingBundlePurchase = false);
+      }
+    }
+  }
+  
+  void _handleBundlePaymentSuccess(PaymentSuccessResponse response) async {
+    debugPrint('✅ Razorpay | Bundle Payment Success - PaymentId: ${response.paymentId}');
+    
+    final messenger = ScaffoldMessenger.of(context);
+    final orderId = _currentBundleOrderId;
+    final categoryId = _currentBundleCategoryId;
+    
+    if (_userId == null || orderId == null || categoryId == null) {
+      debugPrint('❌ Razorpay | Missing userId, orderId, or categoryId');
+      messenger.showSnackBar(
+        const SnackBar(content: TranslatedText('Payment successful!')),
+      );
+      setState(() => _processingBundlePurchase = false);
+      return;
+    }
+    
+    try {
+      debugPrint('✅ Razorpay | Verifying bundle payment...');
+      
+      final enrollResponse = await _api.verifyBundlePaymentAndEnroll(
+        userId: _userId!,
+        categoryId: categoryId,
+        paymentId: response.paymentId!,
+        orderId: orderId,
+        signature: response.signature!,
+      );
+      
+      if (!mounted) return;
+      
+      if (enrollResponse.success) {
+        debugPrint('✅ Razorpay | Bundle payment verified and enrolled!');
+        messenger.showSnackBar(
+          const SnackBar(
+            content: TranslatedText('Bundle purchased! You now have access to all topics.'),
+            backgroundColor: Color(0xFF22C55E),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        
+        // Add the purchased category to the set immediately for instant UI update
+        setState(() {
+          _purchasedBundleCategoryIds.add(categoryId);
+        });
+        
+        // Refresh data to reflect new enrollments
+        _loadUserBundles();
+        _hydrate();
+      } else {
+        debugPrint('❌ Razorpay | Bundle verification failed: ${enrollResponse.message}');
+        messenger.showSnackBar(
+          SnackBar(content: Text('Error: ${enrollResponse.message}')),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Razorpay | Error verifying bundle payment: $e');
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _processingBundlePurchase = false);
+      }
+    }
+  }
+  
+  void _handleBundlePaymentError(PaymentFailureResponse response) {
+    debugPrint('❌ Razorpay | Bundle Payment Error - ${response.code}: ${response.message}');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Payment failed: ${response.message ?? 'Cancelled'}')),
+    );
+    setState(() => _processingBundlePurchase = false);
+  }
+  
+  void _handleBundleExternalWallet(ExternalWalletResponse response) {
+    debugPrint('Razorpay | External Wallet: ${response.walletName}');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('External wallet: ${response.walletName}')),
+    );
+  }
+
+  String _getCategoryEmoji(String categoryName) {
+    final emojiMap = {
+      'Cyber Entry (Fundamentals)': '🎁',
+      'Cyber Expert (Professional)': '📦',
+      'Cyber Explorer (Intermediate)': '🔍',
+      'Security': '🔒',
+      'Cryptography': '🔐',
+      'Network Security': '🌐',
+      'Malware Analysis': '🦠',
+      'Penetration Testing': '🎯',
+      'Cloud Security': '☁️',
+      'Incident Response': '🚨',
+    };
+    return emojiMap[categoryName] ?? '📚';
+  }
+
   Widget _buildModernTopicCard(CourseTopic topic) {
     final isFree = topic.isFree;
+    
+    // Determine plan type for the current category
+    final planType = _selectedCategory?.planType ?? 'INDIVIDUAL';
+    
+    // Only show "Free" tag for FREE plan type, never for BUNDLE or FLEXIBLE
+    final showFreeTag = isFree && planType == 'FREE';
+    
+    // For BUNDLE/FLEXIBLE, don't show price tags either (it's part of bundle)
+    final showPriceTag = planType == 'INDIVIDUAL' || planType == 'FREE';
+    
+    // Check if user has access via bundle purchase or individual enrollment
+    final hasBundleAccess = _purchasedBundleCategoryIds.contains(
+      _categories.firstWhere(
+        (c) => c.name == topic.categoryName,
+        orElse: () => CourseCategory(id: 0, name: '', description: '', topicsCount: 0, displayOrder: 0, planType: '', bundlePrice: '0', price: '0', flexiblePurchase: false),
+      ).id
+    );
+    final isEnrolled = topic.isEnrolled || hasBundleAccess;
     
     return GestureDetector(
       onTap: () => _navigateToTopic(topic),
@@ -1062,46 +1879,49 @@ class _DashboardState extends State<Dashboard> {
                       width: double.infinity,
                       height: double.infinity,
                     ),
-                    if (isFree)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF10B981),
-                            borderRadius: BorderRadius.circular(8),
+                    // Only show tags for INDIVIDUAL or FREE plan types
+                    if (showPriceTag) ...[
+                      if (showFreeTag)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const TranslatedText(
+                              'Free',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
                           ),
-                          child: const TranslatedText(
-                            'Free',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
+                        )
+                      else if (!isFree && planType == 'INDIVIDUAL')
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF4F46E5),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: TranslatedText(
+                              '₹${topic.price.toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                         ),
-                      )
-                    else
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF4F46E5),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: TranslatedText(
-                            '₹${topic.price.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1112,41 +1932,122 @@ class _DashboardState extends State<Dashboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  TranslatedText(
-                    topic.title,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: _text,
-                      height: 1.3,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  // Title in blue with icon
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0D6EFD).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.check_circle_rounded,
+                            size: 16,
+                            color: Color(0xFF0D6EFD),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TranslatedText(
+                          topic.title,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF0D6EFD),
+                            height: 1.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 6),
-                  TranslatedText(
-                    topic.categoryName,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: _muted,
-                      fontWeight: FontWeight.w500,
+                  const SizedBox(height: 8),
+                  // Description
+                  if (topic.description.isNotEmpty)
+                    TranslatedText(
+                      topic.description,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF6B7280),
+                        fontWeight: FontWeight.w400,
+                        height: 1.4,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
+                  if (topic.description.isNotEmpty) const SizedBox(height: 8),
+                  // Category and difficulty badges
+                  Row(
+                    children: [
+                      if (topic.categoryName.isNotEmpty)
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF3F4F6),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: TranslatedText(
+                              topic.categoryName,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Color(0xFF6B7280),
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      if (topic.difficulty.isNotEmpty) const SizedBox(width: 4),
+                      if (topic.difficulty.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: _getDifficultyColor(topic.difficulty).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: TranslatedText(
+                            topic.difficulty,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: _getDifficultyColor(topic.difficulty),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   // Progress or enrollment status
-                  if (topic.isEnrolled)
+                  if (isEnrolled)
                     Container(
+                      width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: const Color(0xFF10B981).withOpacity(0.1),
                         borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: const Color(0xFF10B981).withOpacity(0.2),
+                          width: 1,
+                        ),
                       ),
-                      child: const TranslatedText(
-                        'Enrolled',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF10B981),
+                      child: const Center(
+                        child: TranslatedText(
+                          'Enrolled',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF10B981),
+                          ),
                         ),
                       ),
                     ),
@@ -1157,6 +2058,19 @@ class _DashboardState extends State<Dashboard> {
         ),
       ),
     );
+  }
+
+  Color _getDifficultyColor(String difficulty) {
+    switch (difficulty.toLowerCase()) {
+      case 'beginner':
+        return const Color(0xFF10B981);
+      case 'intermediate':
+        return const Color(0xFF0EA5E9);
+      case 'advanced':
+        return const Color(0xFFEF4444);
+      default:
+        return const Color(0xFF6B7280);
+    }
   }
 
   Widget _buildPlanBanner() {

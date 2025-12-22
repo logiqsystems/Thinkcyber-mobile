@@ -85,10 +85,20 @@ class ApiConfig {
   static const String enrollmentsEnroll = '/enrollments/enroll';
   static const String enrollmentsCreateOrder = '/enrollments/create-order';
   static const String enrollmentsVerifyPayment = '/enrollments/verify-payment';
+  static const String enrollmentsVerifyBundlePayment = '/enrollments/verify-bundle-payment';
   static const String enrollmentsUserEnrollments = '/enrollments/user'; // Will be appended with /{userId}
+  static const String enrollmentsUserBundles = '/enrollments/user-bundles'; // Will be appended with /{userId}
+  static const String categoryTopicsAccess = '/enrollments/category-topics-access'; // Will be appended with /{userId}/{categoryId}
   
   /// Get user enrollments endpoint with userId
   static String enrollmentsUserEnrollmentsWithId(int userId) => '$enrollmentsUserEnrollments/$userId';
+  
+  /// Get user bundles endpoint with userId
+  static String enrollmentsUserBundlesWithId(int userId) => '$enrollmentsUserBundles/$userId';
+  
+  /// Get category topics access endpoint with userId and categoryId
+  static String categoryTopicsAccessWithIds(int userId, int categoryId) =>
+      '$categoryTopicsAccess/$userId/$categoryId';
   
   /// Payment endpoints
   static const String paymentsCreateIntent = '/payments/create-intent';

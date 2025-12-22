@@ -71,6 +71,12 @@ class ThinkCyberApi {
 
   Future<List<CourseTopic>> fetchUserEnrollments({required int userId}) async {
     final payload = await _getJsonList(ApiConfig.enrollmentsUserEnrollmentsWithId(userId));
+    
+    // Debug: Print complete raw response
+    developer.log('=== COMPLETE /enrollments/user/$userId RESPONSE ===');
+    developer.log(jsonEncode(payload));
+    developer.log('=== END RESPONSE ===');
+    
     if (payload.isEmpty) {
       return const [];
     }
@@ -118,6 +124,97 @@ class ThinkCyberApi {
           ),
         )
         .toList(growable: false);
+  }
+
+  Future<List<UserBundle>> fetchUserBundles({required int userId}) async {
+    try {
+      final json = await _getJson(ApiConfig.enrollmentsUserBundlesWithId(userId));
+      
+      // Debug: Print complete raw response
+      developer.log('=== COMPLETE /enrollments/user-bundles/$userId RESPONSE ===');
+      developer.log(jsonEncode(json));
+      developer.log('=== END RESPONSE ===');
+      
+      final bundles = json['bundles'] as List<dynamic>? ?? [];
+      return bundles.map((data) {
+        return UserBundle(
+          id: data['id'] as int? ?? 0,
+          userId: data['user_id'] as int? ?? 0,
+          categoryId: data['category_id'] as int? ?? 0,
+          categoryName: data['category_name'] as String? ?? '',
+          bundlePrice: data['bundle_price'] is String
+              ? double.tryParse(data['bundle_price'] as String) ?? 0.0
+              : (data['bundle_price'] as num?)?.toDouble() ?? 0.0,
+          planType: data['plan_type'] as String? ?? 'BUNDLE',
+          paymentStatus: data['payment_status'] as String? ?? '',
+          enrolledAt: data['enrolled_at'] as String? ?? '',
+          futureTopicsIncluded: data['future_topics_included'] == true ||
+              data['future_topics_included'] == 'true' ||
+              data['future_topics_included'] == 1,
+          accessibleTopicsCount: int.tryParse(data['accessible_topics_count']?.toString() ?? '0') ?? 0,
+          description: data['description'] as String? ?? '',
+        );
+      }).toList();
+    } catch (e) {
+      developer.log('Error fetching user bundles: $e');
+      return const [];
+    }
+  }
+
+  Future<List<CourseTopic>> fetchCategoryTopicsAccess({
+    required int userId,
+    required int categoryId,
+  }) async {
+    try {
+      print('=== fetchCategoryTopicsAccess START: user $userId, category $categoryId ===');
+      
+      // Step 1: Get accessible topic IDs
+      final json = await _getJson(ApiConfig.categoryTopicsAccessWithIds(userId, categoryId));
+      print('✓ API response received');
+      
+      // Extract accessible topic IDs from response
+      final accessibleTopicIds = json['accessibleTopics'] as List<dynamic>? ?? [];
+      print('Accessible topic count: ${accessibleTopicIds.length}');
+      print('Accessible IDs: $accessibleTopicIds');
+      
+      final accessibleIds = <int>{};
+      for (var id in accessibleTopicIds) {
+        if (id is int) {
+          accessibleIds.add(id);
+        } else if (id is String) {
+          final parsed = int.tryParse(id);
+          if (parsed != null) accessibleIds.add(parsed);
+        }
+      }
+      
+      print('Converted IDs: $accessibleIds');
+      
+      if (accessibleIds.isEmpty) {
+        print('No accessible topics found');
+        return const [];
+      }
+      
+      // Step 2: Fetch ALL topics from /topics endpoint
+      print('⏳ Fetching all topics from /topics...');
+      final topicsResponse = await fetchTopics(userId: userId);
+      print('✓ Fetched ${topicsResponse.topics.length} total topics');
+      
+      // Step 3: Filter to only include accessible topics
+      final accessibleTopics = topicsResponse.topics
+          .where((topic) => accessibleIds.contains(topic.id))
+          .toList();
+      
+      print('✅ Filtered to ${accessibleTopics.length} accessible topics');
+      for (var t in accessibleTopics) {
+        print('  - Topic ${t.id}: ${t.title}');
+      }
+      
+      return accessibleTopics;
+    } catch (e, st) {
+      print('❌ Error in fetchCategoryTopicsAccess: $e');
+      print('Stack trace:\n$st');
+      return const [];
+    }
   }
 
   Future<MobileEnrollmentResponse> createMobileEnrollment({
@@ -222,6 +319,65 @@ class ThinkCyberApi {
         'razorpay_signature': signature,
         'userId': userId,
         'topicId': topicId,
+      },
+    );
+
+    return GenericResponse.fromJson(json);
+  }
+
+  /// Create order for bundle purchase (Razorpay)
+  Future<Map<String, dynamic>> createOrderForBundle({
+    required int userId,
+    required int categoryId,
+    required String email,
+  }) async {
+    final json = await _postJson(
+      path: ApiConfig.enrollmentsCreateOrder,
+      payload: {
+        'userId': userId,
+        'categoryId': categoryId,
+        'email': email,
+        'isBundle': true,
+      },
+    );
+
+    return json;
+  }
+
+  /// Verify Razorpay payment and complete bundle enrollment
+  Future<GenericResponse> verifyBundlePaymentAndEnroll({
+    required int userId,
+    required int categoryId,
+    required String paymentId,
+    required String orderId,
+    required String signature,
+  }) async {
+    final json = await _postJson(
+      path: ApiConfig.enrollmentsVerifyBundlePayment,
+      payload: {
+        'razorpay_order_id': orderId,
+        'razorpay_payment_id': paymentId,
+        'razorpay_signature': signature,
+        'userId': userId,
+        'categoryId': categoryId,
+      },
+    );
+
+    return GenericResponse.fromJson(json);
+  }
+
+  /// Purchase an individual topic (no future topics included)
+  Future<GenericResponse> purchaseIndividualTopic({
+    required int userId,
+    required int topicId,
+    required String email,
+  }) async {
+    final json = await _postJson(
+      path: '/enrollments/purchase-individual',
+      payload: {
+        'userId': userId,
+        'topicId': topicId,
+        'email': email,
       },
     );
 
@@ -1228,7 +1384,6 @@ class CourseCategory {
     required this.planType,
     required this.bundlePrice,
     required this.price,
-    required this.futureTopicsIncluded,
     required this.flexiblePurchase,
     required this.displayOrder,
   });
@@ -1240,7 +1395,6 @@ class CourseCategory {
   final String planType;
   final String bundlePrice;
   final String? price;
-  final bool futureTopicsIncluded;
   final bool flexiblePurchase;
   final int displayOrder;
 
@@ -1253,7 +1407,6 @@ class CourseCategory {
       planType: json['plan_type'] as String? ?? 'FLEXIBLE',
       bundlePrice: json['bundle_price'] as String? ?? '0.00',
       price: json['price'] as String?,
-      futureTopicsIncluded: json['future_topics_included'] as bool? ?? false,
       flexiblePurchase: json['flexible_purchase'] as bool? ?? false,
       displayOrder: json['display_order'] as int? ?? 0,
     );
@@ -1274,8 +1427,35 @@ class CategoriesResponse {
     return CategoriesResponse(
       success: json['success'] as bool? ?? false,
       data: dataList
-          .map((item) => Category.fromJson(item as Map<String, dynamic>))
+          .map((item) => CourseCategory.fromJson(item as Map<String, dynamic>))
           .toList(),
     );
   }
+}
+class UserBundle {
+  UserBundle({
+    required this.id,
+    required this.userId,
+    required this.categoryId,
+    required this.categoryName,
+    required this.bundlePrice,
+    required this.planType,
+    required this.paymentStatus,
+    required this.enrolledAt,
+    required this.futureTopicsIncluded,
+    required this.accessibleTopicsCount,
+    required this.description,
+  });
+
+  final int id;
+  final int userId;
+  final int categoryId;
+  final String categoryName;
+  final double bundlePrice;
+  final String planType; // BUNDLE, FLEXIBLE, FREE
+  final String paymentStatus;
+  final String enrolledAt;
+  final bool futureTopicsIncluded;
+  final int accessibleTopicsCount;
+  final String description;
 }
