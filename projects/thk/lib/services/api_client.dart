@@ -57,6 +57,17 @@ class ThinkCyberApi {
     ).then(GenericResponse.fromJson);
   }
 
+  Future<CloseAccountResponse> closeAccount({
+    required int userId,
+    required String reason,
+  }) async {
+    final json = await _postJson(
+      path: ApiConfig.authCloseAccount,
+      payload: {'user_id': userId, 'reason': reason},
+    );
+    return CloseAccountResponse.fromJson(json);
+  }
+
   Future<TopicResponse> fetchTopics({int? userId}) async {
     final path = ApiConfig.topicsListWithUser(userId);
     final json = await _getJson(path);
@@ -121,6 +132,7 @@ class ThinkCyberApi {
             isPaid: parseBool(data['is_paid'] ?? data['isPaid']),
             paymentStatus: (data['payment_status'] ?? data['paymentStatus'])
                 as String?,
+            categoryPlanType: data['category_plan_type'] as String?,
           ),
         )
         .toList(growable: false);
@@ -528,6 +540,16 @@ class ThinkCyberApi {
     }
     return 'Something went wrong. Please try again.';
   }
+
+  Future<PrivacyPolicyResponse> fetchPrivacyPolicy() async {
+    final json = await _getJson(ApiConfig.privacy);
+    return PrivacyPolicyResponse.fromJson(json);
+  }
+
+  Future<TermsAndConditionsResponse> fetchTermsAndConditions() async {
+    final json = await _getJson(ApiConfig.terms);
+    return TermsAndConditionsResponse.fromJson(json);
+  }
 }
 
 void _log(String message, {bool isError = false}) {
@@ -586,6 +608,37 @@ class GenericResponse {
         : (success ? 'Success' : 'Request failed');
 
     return GenericResponse(success: success, message: message);
+  }
+}
+
+class CloseAccountResponse {
+  CloseAccountResponse({
+    required this.success,
+    required this.message,
+    this.requestId,
+    this.status,
+  });
+
+  final bool success;
+  final String message;
+  final String? requestId;
+  final String? status;
+
+  factory CloseAccountResponse.fromJson(Map<String, dynamic> json) {
+    final success = json['success'] as bool? ?? false;
+    final messageCandidate = json['message'] ?? json['error'];
+    final message = messageCandidate is String && messageCandidate.isNotEmpty
+        ? messageCandidate
+        : (success ? 'Account closure request submitted successfully' : 'Request failed');
+    
+    final data = json['data'] as Map<String, dynamic>?;
+    
+    return CloseAccountResponse(
+      success: success,
+      message: message,
+      requestId: data?['request_id'] as String?,
+      status: data?['status'] as String?,
+    );
   }
 }
 
@@ -707,6 +760,7 @@ class CourseTopic {
     this.isEnrolled = false,
     this.isPaid = false,
     this.paymentStatus,
+    this.categoryPlanType,
   });
 
   final int id;
@@ -726,6 +780,7 @@ class CourseTopic {
   final bool isEnrolled;
   final bool isPaid;
   final String? paymentStatus;
+  final String? categoryPlanType; // BUNDLE, FLEXIBLE, FREE
 
   factory CourseTopic.fromJson(Map<String, dynamic> json) {
     String? _string(List<String> keys, {String? fallback}) {
@@ -811,6 +866,8 @@ class CourseTopic {
       isPaid: _bool(['isPaid', 'is_paid'], fallback: false),
       paymentStatus:
           _string(['paymentStatus', 'payment_status'], fallback: null),
+      categoryPlanType:
+          _string(['categoryPlanType', 'category_plan_type'], fallback: null),
     );
   }
 
@@ -832,6 +889,7 @@ class CourseTopic {
     bool? isEnrolled,
     bool? isPaid,
     String? paymentStatus,
+    String? categoryPlanType,
   }) {
     return CourseTopic(
       id: id ?? this.id,
@@ -851,6 +909,7 @@ class CourseTopic {
       isEnrolled: isEnrolled ?? this.isEnrolled,
       isPaid: isPaid ?? this.isPaid,
       paymentStatus: paymentStatus ?? this.paymentStatus,
+      categoryPlanType: categoryPlanType ?? this.categoryPlanType,
     );
   }
 }
@@ -1458,4 +1517,120 @@ class UserBundle {
   final bool futureTopicsIncluded;
   final int accessibleTopicsCount;
   final String description;
+}
+
+class PrivacyPolicyResponse {
+  PrivacyPolicyResponse({
+    required this.success,
+    required this.data,
+  });
+
+  final bool success;
+  final List<PrivacyPolicy> data;
+
+  factory PrivacyPolicyResponse.fromJson(Map<String, dynamic> json) {
+    final dataList = json['data'] as List? ?? [];
+    return PrivacyPolicyResponse(
+      success: json['success'] as bool? ?? false,
+      data: dataList
+          .map((item) => PrivacyPolicy.fromJson(item as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class PrivacyPolicy {
+  PrivacyPolicy({
+    required this.id,
+    required this.title,
+    required this.content,
+    required this.version,
+    required this.language,
+    required this.status,
+    required this.effectiveDate,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final int id;
+  final String title;
+  final String content;
+  final String version;
+  final String language;
+  final String status;
+  final String effectiveDate;
+  final String createdAt;
+  final String updatedAt;
+
+  factory PrivacyPolicy.fromJson(Map<String, dynamic> json) {
+    return PrivacyPolicy(
+      id: json['id'] as int? ?? 0,
+      title: json['title'] as String? ?? '',
+      content: json['content'] as String? ?? '',
+      version: json['version'] as String? ?? '1.0',
+      language: json['language'] as String? ?? 'en',
+      status: json['status'] as String? ?? 'Active',
+      effectiveDate: json['effectiveDate'] as String? ?? '',
+      createdAt: json['createdAt'] as String? ?? '',
+      updatedAt: json['updatedAt'] as String? ?? '',
+    );
+  }
+}
+
+class TermsAndConditionsResponse {
+  TermsAndConditionsResponse({
+    required this.success,
+    required this.data,
+  });
+
+  final bool success;
+  final List<TermsAndConditions> data;
+
+  factory TermsAndConditionsResponse.fromJson(Map<String, dynamic> json) {
+    final dataList = json['data'] as List? ?? [];
+    return TermsAndConditionsResponse(
+      success: json['success'] as bool? ?? false,
+      data: dataList
+          .map((item) => TermsAndConditions.fromJson(item as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class TermsAndConditions {
+  TermsAndConditions({
+    required this.id,
+    required this.title,
+    required this.content,
+    required this.version,
+    required this.language,
+    required this.status,
+    required this.effectiveDate,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final int id;
+  final String title;
+  final String content;
+  final String version;
+  final String language;
+  final String status;
+  final String effectiveDate;
+  final String createdAt;
+  final String updatedAt;
+
+  factory TermsAndConditions.fromJson(Map<String, dynamic> json) {
+    return TermsAndConditions(
+      id: json['id'] as int? ?? 0,
+      title: json['title'] as String? ?? '',
+      content: json['content'] as String? ?? '',
+      version: json['version'] as String? ?? '1.0',
+      language: json['language'] as String? ?? 'en',
+      status: json['status'] as String? ?? 'Active',
+      effectiveDate: json['effectiveDate'] as String? ?? '',
+      createdAt: json['createdAt'] as String? ?? '',
+      updatedAt: json['updatedAt'] as String? ?? '',
+    );
+  }
 }

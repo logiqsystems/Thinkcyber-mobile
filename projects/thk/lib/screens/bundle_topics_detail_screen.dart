@@ -11,11 +11,15 @@ class BundleTopicsDetailScreen extends StatefulWidget {
     required this.categoryId,
     required this.categoryName,
     required this.userId,
+    this.isIndividualPurchase = false, // True for virtual FLEXIBLE bundles (individual purchases only)
+    this.isFreePlan = false, // True for consolidated free plan (all free topics)
   });
 
   final int categoryId;
   final String categoryName;
   final int userId;
+  final bool isIndividualPurchase;
+  final bool isFreePlan;
 
   @override
   State<BundleTopicsDetailScreen> createState() => _BundleTopicsDetailScreenState();
@@ -46,12 +50,77 @@ class _BundleTopicsDetailScreenState extends State<BundleTopicsDetailScreen> {
       debugPrint('User ID: ${widget.userId}');
       debugPrint('Category ID: ${widget.categoryId}');
       debugPrint('Category Name: ${widget.categoryName}');
+      debugPrint('Is Individual Purchase: ${widget.isIndividualPurchase}');
+      debugPrint('Is Free Plan: ${widget.isFreePlan}');
       
-      // Use the category-topics-access API with passed userId
-      final topics = await _api.fetchCategoryTopicsAccess(
-        userId: widget.userId,
-        categoryId: widget.categoryId,
-      );
+      List<CourseTopic> topics;
+      
+      if (widget.isFreePlan) {
+        // For free plan, show free enrolled topics
+        final enrolledTopics = await _api.fetchUserEnrollments(userId: widget.userId);
+        debugPrint('Free plan - total enrolled topics: ${enrolledTopics.length}');
+        
+        // Get the enrolled topic IDs that are free
+        // If categoryId is 0, it's consolidated (all free topics)
+        // Otherwise filter by category
+        Set<int> freeEnrolledIds;
+        if (widget.categoryId == 0) {
+          // Consolidated free plan - all free topics (categoryPlanType == 'FREE')
+          freeEnrolledIds = enrolledTopics
+              .where((t) => t.categoryPlanType == 'FREE')
+              .map((t) => t.id)
+              .toSet();
+          debugPrint('Consolidated free plan - all free enrolled IDs: $freeEnrolledIds');
+        } else {
+          // Category-specific free plan - filter by category
+          freeEnrolledIds = enrolledTopics
+              .where((t) => t.categoryPlanType == 'FREE' && t.categoryId == widget.categoryId)
+              .map((t) => t.id)
+              .toSet();
+          debugPrint('Category-specific free plan - IDs in category ${widget.categoryId}: $freeEnrolledIds');
+        }
+        
+        // Fetch all courses to get full topic details
+        final allCoursesResponse = await _api.fetchTopics(userId: widget.userId);
+        final allCourses = allCoursesResponse.topics;
+        
+        // Match enrolled free topics with full course details
+        topics = allCourses
+            .where((c) => freeEnrolledIds.contains(c.id))
+            .map((c) => c.copyWith(isEnrolled: true))
+            .toList();
+        
+        debugPrint('Free plan - showing free enrolled topics with details: ${topics.length}');
+      } else if (widget.isIndividualPurchase) {
+        // For individual purchases in FLEXIBLE categories, 
+        // only show the specific topics the user has enrolled in
+        final enrolledTopics = await _api.fetchUserEnrollments(userId: widget.userId);
+        
+        // Get enrolled topic IDs in this category
+        final enrolledIds = enrolledTopics
+            .where((t) => t.categoryId == widget.categoryId)
+            .map((t) => t.id)
+            .toSet();
+        debugPrint('Individual purchase - enrolled topic IDs in category: $enrolledIds');
+        
+        // Fetch all courses to get full topic details
+        final allCoursesResponse = await _api.fetchTopics(userId: widget.userId);
+        final allCourses = allCoursesResponse.topics;
+        
+        // Match enrolled topics with full course details
+        topics = allCourses
+            .where((c) => enrolledIds.contains(c.id))
+            .map((c) => c.copyWith(isEnrolled: true))
+            .toList();
+        
+        debugPrint('Individual purchase - filtered to enrolled topics in category: ${topics.length}');
+      } else {
+        // For full bundle purchases, use the category-topics-access API
+        topics = await _api.fetchCategoryTopicsAccess(
+          userId: widget.userId,
+          categoryId: widget.categoryId,
+        );
+      }
       
       debugPrint('Topics loaded: ${topics.length}');
       for (var t in topics) {
@@ -174,6 +243,11 @@ class _BundleTopicsDetailScreenState extends State<BundleTopicsDetailScreen> {
     final endIndex = (startIndex + _topicsPerPage).clamp(0, _bundleTopics.length);
     final pageTopics = _bundleTopics.sublist(startIndex, endIndex);
 
+    // Determine the title based on the plan type
+    final String topicsTitle = widget.isFreePlan 
+        ? 'Free Topics' 
+        : (widget.isIndividualPurchase ? 'Enrolled Topics' : 'Bundle Topics');
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -182,7 +256,7 @@ class _BundleTopicsDetailScreenState extends State<BundleTopicsDetailScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             TranslatedText(
-              'Bundle Topics',
+              topicsTitle,
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,

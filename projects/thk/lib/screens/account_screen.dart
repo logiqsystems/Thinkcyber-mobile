@@ -104,202 +104,475 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   void _showCloseAccountConfirmation() {
+    final TextEditingController reasonController = TextEditingController();
+    final supportEmail = _contact?.supportEmail ?? _contact?.email ?? 'support@thinkcyber.in';
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        decoration: const BoxDecoration(
+          color: Color(0xFFFEF2F2),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[400],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              // Header
+              Row(
+                children: [
+                  Expanded(
+                    child: RichText(
+                      text: const TextSpan(
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: Color(0xFF1F2937),
+                          height: 1.5,
+                        ),
+                        children: [
+                          TextSpan(text: 'If you close your account, you won\'t be able to connect with '),
+                          TextSpan(
+                            text: 'ThinkCyber',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFDC2626),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              
+              // Reopen account info
+              RichText(
+                text: TextSpan(
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF1F2937),
+                    height: 1.5,
+                  ),
+                  children: [
+                    const TextSpan(text: 'To reopen your account, please reach out to '),
+                    TextSpan(
+                      text: 'ThinkCyber Representative',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1F2937),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              // Support Email Display
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.email_outlined,
+                      size: 18,
+                      color: Color(0xFF6B7280),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        supportEmail,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Color(0xFF1F2937),
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => _launchEmail(supportEmail),
+                      child: const Icon(
+                        Icons.open_in_new,
+                        size: 18,
+                        color: Color(0xFF6366F1),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Reason label
+              const Text(
+                'Why do you wish to close your account?',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF1F2937),
+                ),
+              ),
+              const SizedBox(height: 8),
+              
+              // Reason text area
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: TextField(
+                  controller: reasonController,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    hintText: 'Please tell us why you want to close your account...',
+                    hintStyle: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF9CA3AF),
+                    ),
+                    contentPadding: EdgeInsets.all(16),
+                    border: InputBorder.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Continue Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0EA5E9),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: () {
+                    if (reasonController.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please provide a reason for closing your account'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+                    Navigator.pop(context);
+                    _showFinalCloseAccountWarning(reasonController.text.trim());
+                  },
+                  child: const Text(
+                    'Continue',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showFinalCloseAccountWarning(String reason) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const TranslatedText('Close Account'),
-        content: const TranslatedText(
-          'Are you absolutely sure you want to close your account? This action is permanent and cannot be undone.',
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            SizedBox(width: 10),
+            Text(
+              'Final Warning',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1F2937),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'This is your final chance. All your data will be permanently deleted. This action cannot be undone.',
+          style: TextStyle(
+            fontSize: 14,
+            color: Color(0xFF6B7280),
+            height: 1.5,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const TranslatedText('Cancel'),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _showFinalCloseAccountWarning();
+              _submitCloseAccountRequest(reason);
             },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const TranslatedText('Close Account'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Close Account',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
     );
   }
 
-  void _showFinalCloseAccountWarning() {
+  Future<void> _submitCloseAccountRequest(String reason) async {
+    // Show loading indicator
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const TranslatedText('Final Warning'),
-        content: const TranslatedText(
-          'This is your final chance. All your data will be permanently deleted. Type "CLOSE" to confirm.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const TranslatedText('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // In a real app, you would call an API endpoint to close the account
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: TranslatedText('Please contact support to close your account.'),
-                  duration: Duration(seconds: 3),
-                ),
-              );
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const TranslatedText('I Understand'),
-          ),
-        ],
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
       ),
     );
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('thinkcyber_user_id');
+
+      if (userId == null) {
+        Navigator.pop(context); // Close loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to identify user. Please log in again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      final response = await _api.closeAccount(
+        userId: userId,
+        reason: reason,
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading
+
+      if (response.success) {
+        // Show success message with logout note
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(response.message),
+                const SizedBox(height: 4),
+                const Text(
+                  'You will be logged out from the app.',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFF059669),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        
+        // Wait for snackbar to show, then logout
+        await Future.delayed(const Duration(seconds: 3));
+        
+        // Logout the user completely
+        await SessionService.clearSession();
+        
+        if (!mounted) return;
+        
+        // Navigate to login screen and remove all previous routes
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response.message),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to submit request: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const TranslatedText('Account'),
+        title: const TranslatedText('Profile'),
         elevation: 0,
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: const Color(0xFF6366F1),
         foregroundColor: Colors.white,
       ),
       body: Container(
-        color: const Color(0xFFF5F7FA),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF6366F1),
+              Color(0xFFF5F7FA),
+            ],
+            stops: [0.0, 0.3],
+          ),
+        ),
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Profile Section
+                    // Profile Header Section
                     Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            const Color(0xFF2E7DFF),
-                            const Color(0xFF1E5FCC).withOpacity(0.8),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
+                        color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF2E7DFF).withOpacity(0.3),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
                           ),
                         ],
                       ),
-                      padding: const EdgeInsets.all(20),
                       child: Column(
                         children: [
+                          // App Icon as Profile Picture
                           Container(
-                            width: 80,
-                            height: 80,
+                            width: 100,
+                            height: 100,
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
                               shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                colors: [
+                                  const Color(0xFF6366F1).withOpacity(0.1),
+                                  const Color(0xFF8B5CF6).withOpacity(0.1),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF6366F1).withOpacity(0.2),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
                             ),
-                            child: const Icon(
-                              Icons.person,
-                              size: 40,
-                              color: Colors.white,
+                            child: ClipOval(
+                              child: Image.asset(
+                                'Asset/appIcon.png',
+                                width: 100,
+                                height: 100 ,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    color: const Color(0xFF6366F1).withOpacity(0.1),
+                                    child: const Icon(
+                                      Icons.person,
+                                      size: 50,
+                                      color: Color(0xFF6366F1),
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           ),
                           const SizedBox(height: 16),
                           Text(
                             _userName ?? 'User',
                             style: const TextStyle(
-                              fontSize: 20,
+                              fontSize: 24,
                               fontWeight: FontWeight.w700,
-                              color: Colors.white,
+                              color: Color(0xFF1F2937),
                             ),
                           ),
                           const SizedBox(height: 8),
-                          Text(
-                            _userEmail ?? 'email@example.com',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white.withOpacity(0.9),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              _userEmail ?? 'email@example.com',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFF6366F1),
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
-
-                    // Account Info Section
-                    const TranslatedText(
-                      'Account Information',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF1F2937),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _buildInfoCard(
-                      icon: Icons.email_outlined,
-                      label: 'Email Address',
-                      value: _userEmail ?? 'Not set',
-                    ),
-                    const SizedBox(height: 12),
-                    _buildInfoCard(
-                      icon: Icons.person_outline,
-                      label: 'Full Name',
-                      value: _userName ?? 'Not set',
-                    ),
-
-                    if (_contact != null) ...[
-                      const SizedBox(height: 28),
-
-                      // Contact Support Section
-                      const TranslatedText(
-                        'Need Help?',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF1F2937),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      if (_contact!.supportEmail.isNotEmpty)
-                        _buildActionCard(
-                          icon: Icons.support_agent_outlined,
-                          title: 'Contact Support',
-                          subtitle: _contact!.supportEmail,
-                          onTap: () => _launchEmail(_contact!.supportEmail),
-                        ),
-                      const SizedBox(height: 12),
-                      if (_contact!.phone.isNotEmpty)
-                        _buildActionCard(
-                          icon: Icons.phone_outlined,
-                          title: 'Call Us',
-                          subtitle: _contact!.phone,
-                          onTap: () => _launchPhone(_contact!.phone),
-                        ),
-                      const SizedBox(height: 12),
-                      if (_contact!.email.isNotEmpty)
-                        _buildActionCard(
-                          icon: Icons.email_outlined,
-                          title: 'General Inquiry',
-                          subtitle: _contact!.email,
-                          onTap: () => _launchEmail(_contact!.email),
-                        ),
-                    ],
-
-                    const SizedBox(height: 28),
-
+                    const SizedBox(height: 24),  
                     // Account Closer Section
                     Container(
                       decoration: BoxDecoration(
@@ -354,16 +627,7 @@ class _AccountScreenState extends State<AccountScreen> {
                                 ),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 12),
-                          const TranslatedText(
-                            'Warning: This action is permanent and cannot be undone. All your data, progress, and enrollments will be deleted.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF6B7280),
-                              height: 1.5,
-                            ),
-                          ),
+                          ), 
                           const SizedBox(height: 12),
                           SizedBox(
                             width: double.infinity,

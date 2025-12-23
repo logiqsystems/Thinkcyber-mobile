@@ -413,6 +413,308 @@ void main() {
         expect(canPurchase, isTrue,
             reason: 'User can purchase bundles for different categories');
       });
+
+      test('User cannot purchase bundle if has individual purchase in same category (Flexible Plan)', () {
+        // Arrange - User bought a single topic individually in category 3
+        final individualPurchase = EnrollmentRecord(
+          id: 1,
+          topicId: 5,
+          userId: 10,
+          enrolledAt: DateTime(2024, 12, 21),
+          purchaseType: PurchaseType.individual,
+          categoryId: 3,  // Same category
+          includeFutureTopics: false,
+          topicCreatedAt: null,
+        );
+
+        // Act
+        final canPurchase = accessValidator.canPurchaseBundle(
+          categoryId: 3,
+          enrollments: [individualPurchase],
+        );
+
+        // Assert
+        expect(canPurchase, isFalse, 
+            reason: 'User with individual purchase in flexible plan cannot buy bundle for same category');
+      });
+
+      test('User can purchase bundle for different category even with individual purchase', () {
+        // Arrange - User bought individual topic in category 3
+        final individualPurchase = EnrollmentRecord(
+          id: 1,
+          topicId: 5,
+          userId: 10,
+          enrolledAt: DateTime(2024, 12, 21),
+          purchaseType: PurchaseType.individual,
+          categoryId: 3,
+          includeFutureTopics: false,
+          topicCreatedAt: null,
+        );
+
+        // Act - Try to buy bundle for category 4
+        final canPurchase = accessValidator.canPurchaseBundle(
+          categoryId: 4,  // Different category
+          enrollments: [individualPurchase],
+        );
+
+        // Assert
+        expect(canPurchase, isTrue,
+            reason: 'User can purchase bundle for different category');
+      });
+
+      test('User with individual purchase can check hasIndividualPurchaseInCategory', () {
+        // Arrange
+        final individualPurchase = EnrollmentRecord(
+          id: 1,
+          topicId: 5,
+          userId: 10,
+          enrolledAt: DateTime(2024, 12, 21),
+          purchaseType: PurchaseType.individual,
+          categoryId: 3,
+          includeFutureTopics: false,
+          topicCreatedAt: null,
+        );
+
+        // Act
+        final hasIndividual = accessValidator.hasIndividualPurchaseInCategory(
+          categoryId: 3,
+          enrollments: [individualPurchase],
+        );
+
+        // Assert
+        expect(hasIndividual, isTrue,
+            reason: 'Should detect individual purchase in category');
+      });
+    });
+
+    group('Free Topics', () {
+      test('Free topic is always accessible without enrollment', () {
+        // Arrange
+        final freeTopic = CourseTopic(
+          id: 1,
+          title: 'Intro to Cybersecurity',
+          description: 'Free introduction',
+          categoryId: 1,
+          categoryName: 'Basics',
+          subcategoryId: null,
+          subcategoryName: null,
+          difficulty: 'Beginner',
+          status: 'published',
+          isFree: true,  // FREE topic
+          isFeatured: false,
+          price: 0,
+          durationMinutes: 30,
+          thumbnailUrl: 'https://example.com/image.jpg',
+        );
+
+        // Act
+        final canAccess = enrollmentService.hasAccessToTopic(
+          topic: freeTopic,
+          enrollments: [],  // No enrollments
+        );
+
+        // Assert
+        expect(canAccess, isTrue, reason: 'Free topics should always be accessible');
+      });
+
+      test('Free topic access status shows correct reason', () {
+        // Arrange
+        final freeTopic = CourseTopic(
+          id: 1,
+          title: 'Intro to Cybersecurity',
+          description: 'Free introduction',
+          categoryId: 1,
+          categoryName: 'Basics',
+          subcategoryId: null,
+          subcategoryName: null,
+          difficulty: 'Beginner',
+          status: 'published',
+          isFree: true,
+          isFeatured: false,
+          price: 0,
+          durationMinutes: 30,
+          thumbnailUrl: 'https://example.com/image.jpg',
+        );
+
+        // Act
+        final status = accessValidator.getAccessStatus(
+          topic: freeTopic,
+          enrollments: [],
+        );
+
+        // Assert
+        expect(status.hasAccess, isTrue);
+        expect(status.reason, equals('free_topic'));
+      });
+    });
+
+    group('Flexible Plan Scenarios', () {
+      test('Individual purchase gives access only to that topic', () {
+        // Arrange
+        final individualEnrollment = EnrollmentRecord(
+          id: 1,
+          topicId: 5,
+          userId: 10,
+          enrolledAt: DateTime(2024, 12, 21),
+          purchaseType: PurchaseType.individual,
+          categoryId: 3,
+          includeFutureTopics: false,
+          topicCreatedAt: null,
+        );
+
+        final purchasedTopic = CourseTopic(
+          id: 5,  // Same as enrollment
+          title: 'Authentication',
+          description: 'Auth topic',
+          categoryId: 3,
+          categoryName: 'Security',
+          subcategoryId: null,
+          subcategoryName: null,
+          difficulty: 'Intermediate',
+          status: 'published',
+          isFree: false,
+          isFeatured: false,
+          price: 499,
+          durationMinutes: 120,
+          thumbnailUrl: 'https://example.com/image.jpg',
+        );
+
+        final otherTopic = CourseTopic(
+          id: 6,  // Different topic in same category
+          title: 'Authorization',
+          description: 'Auth topic',
+          categoryId: 3,
+          categoryName: 'Security',
+          subcategoryId: null,
+          subcategoryName: null,
+          difficulty: 'Intermediate',
+          status: 'published',
+          isFree: false,
+          isFeatured: false,
+          price: 499,
+          durationMinutes: 120,
+          thumbnailUrl: 'https://example.com/image.jpg',
+        );
+
+        // Act
+        final canAccessPurchased = enrollmentService.hasAccessToTopic(
+          topic: purchasedTopic,
+          enrollments: [individualEnrollment],
+        );
+        final canAccessOther = enrollmentService.hasAccessToTopic(
+          topic: otherTopic,
+          enrollments: [individualEnrollment],
+        );
+
+        // Assert
+        expect(canAccessPurchased, isTrue, 
+            reason: 'Should access the purchased topic');
+        expect(canAccessOther, isFalse, 
+            reason: 'Should NOT access other topics in same category');
+      });
+
+      test('Bundle purchase gives access to all topics in category', () {
+        // Arrange
+        final bundleEnrollment = EnrollmentRecord(
+          id: 1,
+          topicId: 0,
+          userId: 10,
+          enrolledAt: DateTime(2024, 12, 21),
+          purchaseType: PurchaseType.bundle,
+          categoryId: 3,
+          includeFutureTopics: true,
+          topicCreatedAt: null,
+        );
+
+        final topic1 = CourseTopic(
+          id: 5,
+          title: 'Authentication',
+          description: 'Auth topic',
+          categoryId: 3,
+          categoryName: 'Security',
+          subcategoryId: null,
+          subcategoryName: null,
+          difficulty: 'Intermediate',
+          status: 'published',
+          isFree: false,
+          isFeatured: false,
+          price: 499,
+          durationMinutes: 120,
+          thumbnailUrl: 'https://example.com/image.jpg',
+        );
+
+        final topic2 = CourseTopic(
+          id: 6,
+          title: 'Authorization',
+          description: 'Auth topic',
+          categoryId: 3,
+          categoryName: 'Security',
+          subcategoryId: null,
+          subcategoryName: null,
+          difficulty: 'Intermediate',
+          status: 'published',
+          isFree: false,
+          isFeatured: false,
+          price: 499,
+          durationMinutes: 120,
+          thumbnailUrl: 'https://example.com/image.jpg',
+        );
+
+        // Act
+        final canAccessTopic1 = enrollmentService.hasAccessToTopic(
+          topic: topic1,
+          enrollments: [bundleEnrollment],
+        );
+        final canAccessTopic2 = enrollmentService.hasAccessToTopic(
+          topic: topic2,
+          enrollments: [bundleEnrollment],
+        );
+
+        // Assert
+        expect(canAccessTopic1, isTrue, reason: 'Should access topic 1 in bundle');
+        expect(canAccessTopic2, isTrue, reason: 'Should access topic 2 in bundle');
+      });
+
+      test('Bundle does not give access to topics in other categories', () {
+        // Arrange
+        final bundleEnrollment = EnrollmentRecord(
+          id: 1,
+          topicId: 0,
+          userId: 10,
+          enrolledAt: DateTime(2024, 12, 21),
+          purchaseType: PurchaseType.bundle,
+          categoryId: 3,  // Security category
+          includeFutureTopics: true,
+          topicCreatedAt: null,
+        );
+
+        final otherCategoryTopic = CourseTopic(
+          id: 10,
+          title: 'Networking Basics',
+          description: 'Networking topic',
+          categoryId: 4,  // Different category
+          categoryName: 'Networking',
+          subcategoryId: null,
+          subcategoryName: null,
+          difficulty: 'Beginner',
+          status: 'published',
+          isFree: false,
+          isFeatured: false,
+          price: 399,
+          durationMinutes: 90,
+          thumbnailUrl: 'https://example.com/image.jpg',
+        );
+
+        // Act
+        final canAccess = enrollmentService.hasAccessToTopic(
+          topic: otherCategoryTopic,
+          enrollments: [bundleEnrollment],
+        );
+
+        // Assert
+        expect(canAccess, isFalse, 
+            reason: 'Bundle should not give access to other categories');
+      });
     });
   });
 }

@@ -105,6 +105,7 @@ flutter:
     - Asset/onboarding1.svg
     - Asset/onboarding2.svg
     - Asset/chatbot.png
+    - Asset/appIcon.png
     - assets/translations/ 
 
 

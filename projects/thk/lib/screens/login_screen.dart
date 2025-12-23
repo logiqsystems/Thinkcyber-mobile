@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:ui';
 import 'dart:math' as math;
+import 'package:flutter/gestures.dart';
 
 import '../services/api_client.dart';
 import 'main_navigation_screen.dart';
 import 'otp_verification_screen.dart';
 import 'signup_screen.dart';
+import 'privacy_policy_screen.dart';
+import 'terms_and_conditions_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -23,6 +27,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   late Animation<double> _slideAnimation;
   late Animation<double> _fadeAnimation;
   bool _isLoading = false;
+  bool _agreeToTerms = false;
 
   @override
   void initState() {
@@ -64,6 +69,144 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     _fadeController.dispose();
     _api.dispose();
     super.dispose();
+  }
+
+  void _showAccountClosedDialog(String supportEmail) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE2E2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.no_accounts_rounded,
+                  size: 40,
+                  color: Color(0xFFDC2626),
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Title
+              const Text(
+                'Account Closed',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1F2937),
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              // Description
+              const Text(
+                'Your account has been closed. If you wish to reactivate your account, please contact our support team.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF6B7280),
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Email container
+              GestureDetector(
+                onTap: () async {
+                  final Uri emailUri = Uri(
+                    scheme: 'mailto',
+                    path: supportEmail,
+                    queryParameters: {
+                      'subject': 'Account Reactivation Request',
+                    },
+                  );
+                  if (await canLaunchUrl(emailUri)) {
+                    await launchUrl(emailUri);
+                  }
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.email_outlined,
+                        size: 20,
+                        color: Color(0xFF6366F1),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        supportEmail,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6366F1),
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(
+                        Icons.open_in_new,
+                        size: 16,
+                        color: Color(0xFF6366F1),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // OK Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF6366F1),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'OK',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -388,6 +531,94 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
 
                 const SizedBox(height: 24),
 
+                // Terms and Conditions Checkbox
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0F4FF),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFFE0E7FF),
+                      width: 1,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Checkbox(
+                            value: _agreeToTerms,
+                            onChanged: (value) {
+                              setState(() {
+                                _agreeToTerms = value ?? false;
+                              });
+                            },
+                            activeColor: const Color(0xFF0D6EFD),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: RichText(
+                                text: TextSpan(
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF4B5563),
+                                    height: 1.5,
+                                  ),
+                                  children: [
+                                    const TextSpan(text: 'By signing up you agree to our '),
+                                    TextSpan(
+                                      text: 'Terms & Conditions',
+                                      style: const TextStyle(
+                                        color: Color(0xFF0D6EFD),
+                                        fontWeight: FontWeight.w600,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                      recognizer: TapGestureRecognizer()
+                                        ..onTap = () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => const TermsAndConditionsScreen(),
+                                            ),
+                                          );
+                                        },
+                                    ),
+                                    const TextSpan(text: ' and '),
+                                    TextSpan(
+                                      text: 'Privacy Policy',
+                                      style: const TextStyle(
+                                        color: Color(0xFF0D6EFD),
+                                        fontWeight: FontWeight.w600,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                      recognizer: TapGestureRecognizer()
+                                        ..onTap = () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => const PrivacyPolicyScreen(),
+                                            ),
+                                          );
+                                        },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
                 // Send OTP button with modern styling
                 ElevatedButton(
                   onPressed: _isLoading ? null : _openLoginOtp,
@@ -605,6 +836,43 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
       return;
     }
 
+    if (!_agreeToTerms) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.warning_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Please agree to Terms & Conditions and Privacy Policy',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange.shade600,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.all(16),
+          ),
+        );
+      }
+      return;
+    }
+
     setState(() => _isLoading = true);
     final messenger = ScaffoldMessenger.of(context);
 
@@ -663,6 +931,14 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _isLoading = false);
+
+      // Check if account is closed
+      if (error.message.toLowerCase().contains('closed') || 
+          error.message.toLowerCase().contains('deactivated') ||
+          error.message.toLowerCase().contains('suspended')) {
+        _showAccountClosedDialog('support@thinkcyber.in');
+        return;
+      }
 
       messenger.showSnackBar(
         SnackBar(

@@ -189,15 +189,45 @@ class TopicAccessValidator {
   }
 
   /// Validate bundle purchase eligibility
+  /// User cannot purchase bundle if:
+  /// 1. Already has a bundle for the category
+  /// 2. Already has any individual purchase in that category (flexible plan restriction)
   bool canPurchaseBundle({
     required int categoryId,
     required List<EnrollmentRecord>? enrollments,
   }) {
     enrollments ??= [];
-    // User cannot purchase bundle if already have one
-    return !enrollments.any(
+    
+    // Check if user already has a bundle for this category
+    final hasBundle = enrollments.any(
       (e) =>
           e.purchaseType == PurchaseType.bundle &&
+          e.categoryId == categoryId,
+    );
+    
+    if (hasBundle) return false;
+    
+    // Check if user has any individual purchase in this category
+    // If they bought any individual topic, they can't buy the bundle
+    // (This is for flexible plan - once you buy individual, no bundle option)
+    final hasIndividualInCategory = enrollments.any(
+      (e) =>
+          e.purchaseType == PurchaseType.individual &&
+          e.categoryId == categoryId,
+    );
+    
+    return !hasIndividualInCategory;
+  }
+
+  /// Check if user has any individual purchases in a category
+  bool hasIndividualPurchaseInCategory({
+    required int categoryId,
+    required List<EnrollmentRecord>? enrollments,
+  }) {
+    enrollments ??= [];
+    return enrollments.any(
+      (e) =>
+          e.purchaseType == PurchaseType.individual &&
           e.categoryId == categoryId,
     );
   }

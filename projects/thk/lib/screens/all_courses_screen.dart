@@ -68,6 +68,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
   List<CourseTopic> _paidCourses = const [];
   List<CourseTopic> _enrolledCourses = const [];
   List<UserBundle> _userBundles = const [];
+  List<CourseCategory> _categories = const []; // Added for plan type lookup
   bool _loading = true;
   String? _error;
   bool _enrollmentsLoading = false;
@@ -188,11 +189,14 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     try {
       final courses = await _api.fetchUserEnrollments(userId: storedUserId);
       final bundles = await _api.fetchUserBundles(userId: storedUserId);
+      // Also fetch categories to get plan types
+      final categoriesResponse = await _api.fetchCategories();
       if (!mounted) return;
       setState(() {
         _userId = storedUserId;
         _enrolledCourses = courses;
         _userBundles = bundles;
+        _categories = categoriesResponse.data;
         _enrollmentsLoading = false;
       });
     } on ApiException catch (error) {
@@ -380,7 +384,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
                     fit: BoxFit.scaleDown,
                     child: TranslatedText(_userId == null
                         ? 'Enrollments'
-                        : 'Enrollments (${_enrolledCourses.length})'),
+                        : 'Enrollments (${_getEnrollmentPlansCount()})'),
                   ),
                 ),
               ],
@@ -426,7 +430,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     debugPrint('=== ALL ENROLLMENTS (${_enrolledCourses.length}) ===');
     for (int i = 0; i < _enrolledCourses.length; i++) {
       final e = _enrolledCourses[i];
-      debugPrint('[$i] ${e.title} - categoryName: "${e.categoryName}" - price: ${e.price}');
+      debugPrint('[$i] ${e.title} - categoryName: "${e.categoryName}" - categoryPlanType: ${e.categoryPlanType} - price: ${e.price}');
     }
     debugPrint('=== ALL BUNDLES (${_userBundles.length}) ===');
     for (int i = 0; i < _userBundles.length; i++) {
@@ -439,7 +443,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
       b.planType == 'BUNDLE'
     ).toList();
     
-    final flexibleBundleEnrollments = _userBundles.where((b) => 
+    var flexibleBundleEnrollments = _userBundles.where((b) => 
       b.planType == 'FLEXIBLE'
     ).toList();
     
@@ -448,38 +452,90 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
       b.planType == 'FREE'
     ).toList();
     
-    // Also add free individual enrollments with categoryName as virtual free bundles
+    // Get category IDs that already have paid or flexible bundles (to exclude from free bundles)
+    final paidBundleCategoryIds = paidBundleEnrollments.map((b) => b.categoryId).toSet();
+    final flexibleBundleCategoryIds = flexibleBundleEnrollments.map((b) => b.categoryId).toSet();
+    final excludedCategoryIds = {...paidBundleCategoryIds, ...flexibleBundleCategoryIds};
+    
+    // Also get category IDs already covered by FREE bundles from API
+    final freeBundleFromApiCategoryIds = freeBundleEnrollments.map((b) => b.categoryId).toSet();
+    
+    // Get all free individual enrollments that are NOT in paid/flexible/free-from-api bundles
     final freeEnrollmentsWithCategory = _enrolledCourses.where((e) =>
-      e.price == 0 && e.categoryName != null && e.categoryName!.isNotEmpty
+      e.categoryPlanType == 'FREE' && 
+      e.categoryName != null && 
+      e.categoryName!.isNotEmpty &&
+      !excludedCategoryIds.contains(e.categoryId) && // Exclude if in paid/flexible bundle
+      !freeBundleFromApiCategoryIds.contains(e.categoryId) // Exclude if already in free bundle from API
     ).toList();
     
-    // Convert free enrollments with category to virtual UserBundles
-    final Map<String, List<CourseTopic>> freeByCategory = {};
+    debugPrint('=== FREE ENROLLMENTS DEBUG ===');
+    debugPrint('Total _enrolledCourses: ${_enrolledCourses.length}');
+    debugPrint('Free enrollments with category: ${freeEnrollmentsWithCategory.length}');
     for (final e in freeEnrollmentsWithCategory) {
-      final cat = e.categoryName ?? 'General';
-      freeByCategory.putIfAbsent(cat, () => []).add(e);
+      debugPrint('  - ${e.title}: isFree=${e.isFree}, price=${e.price}, categoryId=${e.categoryId}');
     }
     
-    // Create virtual bundles from free course groups
-    for (final entry in freeByCategory.entries) {
-      final firstTopic = entry.value.first;
+    // Create a SINGLE virtual free bundle for ALL free enrollments (not per category)
+    if (freeEnrollmentsWithCategory.isNotEmpty) {
       final virtualFreeBundle = UserBundle(
         id: -1,
         userId: _userId ?? 0,
-        categoryId: firstTopic.categoryId,
-        categoryName: entry.key,
+        categoryId: 0, // Generic - represents all free topics
+        categoryName: 'Free Topics',
         bundlePrice: 0,
         planType: 'FREE',
         paymentStatus: 'completed',
         enrolledAt: DateTime.now().toIso8601String(),
         futureTopicsIncluded: true,
-        accessibleTopicsCount: entry.value.length,
+        accessibleTopicsCount: freeEnrollmentsWithCategory.length,
         description: 'Free Plan',
       );
+      freeBundleEnrollments = [...freeBundleEnrollments, virtualFreeBundle];
+    }
+
+    // Also create virtual FLEXIBLE bundles from individual paid enrollments in FLEXIBLE categories
+    // Now using categoryPlanType directly from the enrollment API
+    final paidEnrollmentsWithCategory = _enrolledCourses.where((e) =>
+      e.price > 0 && e.categoryName != null && e.categoryName!.isNotEmpty
+    ).toList();
+    
+    debugPrint('=== PAID ENROLLMENTS WITH CATEGORY ===');
+    for (final e in paidEnrollmentsWithCategory) {
+      debugPrint('Topic: ${e.title}, categoryId: ${e.categoryId}, categoryName: "${e.categoryName}", categoryPlanType: ${e.categoryPlanType}, price: ${e.price}');
+    }
+
+    // Group paid enrollments by category
+    final Map<int, List<CourseTopic>> paidByCategory = {};
+    for (final e in paidEnrollmentsWithCategory) {
+      paidByCategory.putIfAbsent(e.categoryId, () => []).add(e);
+    }
+
+    // Create virtual flexible bundles for FLEXIBLE category enrollments
+    for (final entry in paidByCategory.entries) {
+      final categoryId = entry.key;
+      final topics = entry.value;
+      // Use categoryPlanType directly from the enrollment (from API)
+      final planType = topics.first.categoryPlanType;
       
-      // Only add if not already in bundles from API
-      if (!freeBundleEnrollments.any((b) => b.categoryId == firstTopic.categoryId)) {
-        freeBundleEnrollments = [...freeBundleEnrollments, virtualFreeBundle];
+      // Only create virtual bundle for FLEXIBLE categories that don't have a bundle entry
+      if (planType == 'FLEXIBLE' && !flexibleBundleEnrollments.any((b) => b.categoryId == categoryId)) {
+        final categoryName = topics.first.categoryName ?? 'General';
+        final virtualFlexibleBundle = UserBundle(
+          id: -1,
+          userId: _userId ?? 0,
+          categoryId: categoryId,
+          categoryName: categoryName,
+          bundlePrice: 0, // Individual purchases, no bundle price
+          planType: 'FLEXIBLE',
+          paymentStatus: 'completed',
+          enrolledAt: DateTime.now().toIso8601String(),
+          futureTopicsIncluded: false, // Individual purchases don't include future topics
+          accessibleTopicsCount: topics.length, // Only the individually purchased topics
+          description: 'Flexible Plan (Individual)',
+        );
+        flexibleBundleEnrollments = [...flexibleBundleEnrollments, virtualFlexibleBundle];
+        debugPrint('📦 Created virtual FLEXIBLE bundle for $categoryName (ID: $categoryId) with ${topics.length} topics');
       }
     }
     
@@ -691,6 +747,60 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     );
   }
 
+  // Calculate total number of plan cards to display in Enrollments tab
+  int _getEnrollmentPlansCount() {
+    if (_enrolledCourses.isEmpty) return 0;
+    
+    // Count paid bundle enrollments
+    final paidBundleCount = _userBundles.where((b) => b.planType == 'BUNDLE').length;
+    
+    // Count flexible bundle enrollments (from API)
+    final flexibleBundleCount = _userBundles.where((b) => b.planType == 'FLEXIBLE').length;
+    
+    // Count free bundle enrollments (from API)
+    final freeBundleFromApiCount = _userBundles.where((b) => b.planType == 'FREE').length;
+    
+    // Get category IDs already covered by paid/flexible bundles
+    final paidBundleCategoryIds = _userBundles
+        .where((b) => b.planType == 'BUNDLE')
+        .map((b) => b.categoryId)
+        .toSet();
+    final flexibleBundleCategoryIds = _userBundles
+        .where((b) => b.planType == 'FLEXIBLE')
+        .map((b) => b.categoryId)
+        .toSet();
+    final excludedCategoryIds = {...paidBundleCategoryIds, ...flexibleBundleCategoryIds};
+    
+    // Count virtual flexible bundles (individual purchases in FLEXIBLE categories)
+    final flexibleIndividualCategoryIds = _enrolledCourses
+        .where((e) => e.price > 0 && e.categoryPlanType == 'FLEXIBLE' && !flexibleBundleCategoryIds.contains(e.categoryId))
+        .map((e) => e.categoryId)
+        .toSet();
+    final virtualFlexibleCount = flexibleIndividualCategoryIds.length;
+    
+    // Count virtual free bundles as 1 if there are any free enrollments not in paid/flexible/free bundles
+    final freeBundleCategoryIds = _userBundles
+        .where((b) => b.planType == 'FREE')
+        .map((b) => b.categoryId)
+        .toSet();
+    final hasFreeEnrollments = _enrolledCourses.any((e) => 
+        e.categoryPlanType == 'FREE' && 
+        e.categoryName != null && 
+        e.categoryName!.isNotEmpty &&
+        !excludedCategoryIds.contains(e.categoryId) &&
+        !freeBundleCategoryIds.contains(e.categoryId)
+    );
+    final virtualFreeCount = hasFreeEnrollments ? 1 : 0; // Count as 1 consolidated free plan
+    
+    // Count individual enrollments (no category)
+    final individualCount = _enrolledCourses
+        .where((c) => c.categoryName == null || c.categoryName!.isEmpty)
+        .length > 0 ? 1 : 0; // Just 1 section for all individuals
+    
+    return paidBundleCount + flexibleBundleCount + virtualFlexibleCount + 
+           freeBundleFromApiCount + virtualFreeCount + individualCount;
+  }
+
   int _getBundleCount(List<CourseTopic> courses) {
     // Bundle: Only paid courses with category names
     // Must check actual _courses list since enrollment API doesn't return price
@@ -761,6 +871,30 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
   // Helper: Get total topics count for a category using loaded courses
   int _getTopicsCountForCategoryId(int categoryId) {
     return _courses.where((c) => c.categoryId == categoryId).length;
+  }
+
+  // Helper: Get the plan type for a category ID
+  String? _getPlanTypeForCategoryId(int categoryId) {
+    try {
+      final category = _categories.firstWhere((c) => c.id == categoryId);
+      return category.planType;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Helper: Get the category for a category ID
+  CourseCategory? _getCategoryById(int categoryId) {
+    try {
+      return _categories.firstWhere((c) => c.id == categoryId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Helper: Get enrolled topics count for a category ID
+  int _getEnrolledTopicsCountForCategoryId(int categoryId) {
+    return _enrolledCourses.where((c) => c.categoryId == categoryId).length;
   }
 
   List<Widget> _buildBundleCards(List<CourseTopic> courses) {
@@ -1206,13 +1340,30 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
   }
 
   Widget _buildBundleCard(UserBundle bundle, Color color, String planLabel) {
-    // For BUNDLE/FLEXIBLE plans, show total topics count
+    // Check if this is the consolidated free bundle (categoryId == 0)
+    final isConsolidatedFreePlan = planLabel == 'FREE' && bundle.categoryId == 0;
+    
+    // For BUNDLE plans (full purchase), show total topics count
+    // For FLEXIBLE plans, show enrolled topics count (for individual purchases) 
+    //   OR total if it's a full bundle purchase (bundle.id != -1 means API bundle)
     // For FREE plans, show actual enrolled count from _enrolledCourses
     int displayTopicsCount;
-    if (planLabel == 'BUNDLE' || planLabel == 'FLEXIBLE') {
+    if (planLabel == 'BUNDLE') {
       displayTopicsCount = _getTopicsCountForCategoryId(bundle.categoryId);
+    } else if (planLabel == 'FLEXIBLE') {
+      // If it's a virtual bundle (id == -1), use the accessibleTopicsCount we calculated
+      // (which only counts paid individual purchases, not free topics)
+      // If it's from API (full bundle purchase), show total topics in category
+      if (bundle.id == -1) {
+        displayTopicsCount = bundle.accessibleTopicsCount;
+      } else {
+        displayTopicsCount = _getTopicsCountForCategoryId(bundle.categoryId);
+      }
+    } else if (isConsolidatedFreePlan) {
+      // Consolidated free plan: use the accessibleTopicsCount which has the total count
+      displayTopicsCount = bundle.accessibleTopicsCount;
     } else {
-      // FREE plan: count actual enrolled topics in this category
+      // FREE plan from API: count actual enrolled topics in this category
       displayTopicsCount = _enrolledCourses.where((c) => 
         c.categoryId == bundle.categoryId && c.price == 0
       ).length;
@@ -1401,7 +1552,17 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
                         elevation: 0,
                       ),
                       onPressed: () {
-                        debugPrint('Viewing topics for: ${bundle.categoryName} (category ${bundle.categoryId})');
+                        // For virtual FLEXIBLE bundles (id == -1), it's individual purchase
+                        final isIndividualPurchase = planLabel == 'FLEXIBLE' && bundle.id == -1;
+                        // Check if this is a FREE plan (consolidated or from API)
+                        // For FREE plans, we always want to show enrolled free topics, not category topics
+                        final isFreePlan = planLabel == 'FREE';
+                        debugPrint('=== VIEW TOPICS BUTTON PRESSED ===');
+                        debugPrint('Category: ${bundle.categoryName} (ID: ${bundle.categoryId})');
+                        debugPrint('Plan Label: $planLabel');
+                        debugPrint('Bundle ID: ${bundle.id}');
+                        debugPrint('Is Individual Purchase: $isIndividualPurchase');
+                        debugPrint('Is Free Plan: $isFreePlan');
                         Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -1409,6 +1570,8 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
                               categoryId: bundle.categoryId,
                               categoryName: bundle.categoryName,
                               userId: _userId ?? 0,
+                              isIndividualPurchase: isIndividualPurchase,
+                              isFreePlan: isFreePlan,
                             ),
                           ),
                         );

@@ -99,6 +99,9 @@ class _DashboardState extends State<Dashboard> {
   
   // Track purchased bundles (categoryId -> true)
   Set<int> _purchasedBundleCategoryIds = {};
+  
+  // Track categories with any individual enrollments (for FLEXIBLE plan handling)
+  Set<int> _enrolledCategoryIds = {};
 
   // Razorpay for bundle purchase
   late Razorpay _razorpay;
@@ -283,6 +286,11 @@ class _DashboardState extends State<Dashboard> {
         try {
           final enrolledTopics = await _api.fetchUserEnrollments(userId: storedUserId);
           final enrolledIds = enrolledTopics.map((t) => t.id).toSet();
+          
+          // Track categories that have any enrolled topics (for FLEXIBLE plan handling)
+          final enrolledCatIds = enrolledTopics.map((t) => t.categoryId).toSet();
+          _enrolledCategoryIds = enrolledCatIds;
+          debugPrint('📚 Categories with individual enrollments: $_enrolledCategoryIds');
           
           // Update topics to mark those that are enrolled
           topics = topics.map((topic) {
@@ -1259,8 +1267,20 @@ class _DashboardState extends State<Dashboard> {
     // Get category icon/emoji
     final categoryIconEmoji = _getCategoryEmoji(_selectedCategory!.name);
     
-    // Check if bundle is already purchased
-    final isBundlePurchased = _purchasedBundleCategoryIds.contains(_selectedCategory!.id);
+    // Check if bundle is already purchased OR if user has individual enrollments in FLEXIBLE categories
+    // For FLEXIBLE plans, any enrollment (bundle or individual) should show "View Topics"
+    final hasBundlePurchase = _purchasedBundleCategoryIds.contains(_selectedCategory!.id);
+    final hasIndividualEnrollment = _enrolledCategoryIds.contains(_selectedCategory!.id);
+    final isBundlePurchased = hasBundlePurchase || (planType == 'FLEXIBLE' && hasIndividualEnrollment);
+    
+    // For FLEXIBLE individual purchases, show only enrolled topics count, not all
+    final isFlexibleIndividual = planType == 'FLEXIBLE' && !hasBundlePurchase && hasIndividualEnrollment;
+    // Count enrolled topics in this category
+    final enrolledTopicsInCategory = _topics
+        .where((t) => t.categoryName == _selectedCategory!.name && t.isEnrolled)
+        .length;
+    // Display count: for full bundle = all topics, for individual = enrolled only
+    final displayTopicsCount = isFlexibleIndividual ? enrolledTopicsInCategory : topicsCount;
     
     return Container(
       decoration: BoxDecoration(
@@ -1355,7 +1375,7 @@ class _DashboardState extends State<Dashboard> {
                           const SizedBox(width: 8),
                         ],
                         TranslatedText(
-                          'Access all $topicsCount topics',
+                          'Access all $displayTopicsCount topics',
                           style: const TextStyle(
                             fontSize: 12,
                             color: Color(0xFF6B7280),
@@ -1448,7 +1468,9 @@ class _DashboardState extends State<Dashboard> {
                       ),
                       const SizedBox(height: 8),
                       TranslatedText(
-                        'You have access to all $topicsCount topics',
+                        isFlexibleIndividual 
+                            ? 'You have access to $displayTopicsCount topic${displayTopicsCount > 1 ? 's' : ''}'
+                            : 'You have access to all $displayTopicsCount topics',
                         style: const TextStyle(
                           fontSize: 13,
                           color: Color(0xFF6B7280),
@@ -1464,6 +1486,15 @@ class _DashboardState extends State<Dashboard> {
               GestureDetector(
                 onTap: () {
                   if (isBundlePurchased) {
+                    // Determine if this is an individual purchase (FLEXIBLE with no bundle purchase)
+                    final isIndividualPurchase = planType == 'FLEXIBLE' && 
+                        !hasBundlePurchase && hasIndividualEnrollment;
+                    debugPrint('=== VIEW TOPICS FROM DASHBOARD ===');
+                    debugPrint('Category: ${_selectedCategory!.name} (ID: ${_selectedCategory!.id})');
+                    debugPrint('Plan Type: $planType');
+                    debugPrint('Has Bundle Purchase: $hasBundlePurchase');
+                    debugPrint('Has Individual Enrollment: $hasIndividualEnrollment');
+                    debugPrint('Is Individual Purchase: $isIndividualPurchase');
                     // Navigate to bundle topics
                     Navigator.push(
                       context,
@@ -1472,6 +1503,7 @@ class _DashboardState extends State<Dashboard> {
                           categoryId: _selectedCategory!.id,
                           categoryName: _selectedCategory!.name,
                           userId: _userId ?? 0,
+                          isIndividualPurchase: isIndividualPurchase,
                         ),
                       ),
                     );
@@ -1836,12 +1868,13 @@ class _DashboardState extends State<Dashboard> {
     final showPriceTag = planType == 'INDIVIDUAL' || planType == 'FREE';
     
     // Check if user has access via bundle purchase or individual enrollment
-    final hasBundleAccess = _purchasedBundleCategoryIds.contains(
-      _categories.firstWhere(
-        (c) => c.name == topic.categoryName,
-        orElse: () => CourseCategory(id: 0, name: '', description: '', topicsCount: 0, displayOrder: 0, planType: '', bundlePrice: '0', price: '0', flexiblePurchase: false),
-      ).id
-    );
+    final categoryId = _categories.firstWhere(
+      (c) => c.name == topic.categoryName,
+      orElse: () => CourseCategory(id: 0, name: '', description: '', topicsCount: 0, displayOrder: 0, planType: '', bundlePrice: '0', price: '0', flexiblePurchase: false),
+    ).id;
+    final hasBundleAccess = _purchasedBundleCategoryIds.contains(categoryId);
+    // For FLEXIBLE plans: bundle purchase gives access to ALL topics, 
+    // but individual purchase only gives access to that specific topic (handled by topic.isEnrolled)
     final isEnrolled = topic.isEnrolled || hasBundleAccess;
     
     return GestureDetector(

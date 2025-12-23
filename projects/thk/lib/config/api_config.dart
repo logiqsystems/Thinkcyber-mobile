@@ -19,7 +19,8 @@ class ApiConfig {
   static const Map<ApiEnvironment, EnvironmentConfig> _environments = {
     ApiEnvironment.development: EnvironmentConfig(
       name: 'Development',
-      baseUrl: 'https://api.thinkcyber.info/api',
+      //baseUrl: 'https://api.thinkcyber.info/api',
+      baseUrl: 'http://10.20.0.9:8082/api', 
       timeout: Duration(seconds: 30),
       enableLogging: true,
     ),
@@ -66,6 +67,7 @@ class ApiConfig {
   static const String authResendOtp = '/auth/resend-otp';
   static const String authLogout = '/auth/logout';
   static const String authRefreshToken = '/auth/refresh-token';
+  static const String authCloseAccount = '/auth/close-account';
   
   /// Topics/Courses endpoints
   static const String topicsList = '/topics';
@@ -115,6 +117,10 @@ class ApiConfig {
   /// Analytics endpoints
   static const String analyticsTrackEvent = '/analytics/track';
   static const String analyticsUserProgress = '/analytics/progress';
+  
+  /// Legal documents endpoints
+  static const String privacy = '/privacy';
+  static const String terms = '/terms';
   
   // ==================== THIRD-PARTY API CONFIGURATIONS ====================
   
