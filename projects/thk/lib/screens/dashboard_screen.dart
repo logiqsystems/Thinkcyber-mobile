@@ -110,6 +110,9 @@ class _DashboardState extends State<Dashboard> {
   bool _processingBundlePurchase = false;
   int? _userId;
   String? _userEmail2;
+  
+  // Notification tracking
+  int _unreadNotificationCount = 0;
 
   @override
   void initState() {
@@ -137,6 +140,9 @@ class _DashboardState extends State<Dashboard> {
     
     // Load user info for payment
     _loadUserInfo();
+    
+    // Load unread notifications
+    _loadUnreadNotificationCount();
   }
 
   @override
@@ -192,6 +198,24 @@ class _DashboardState extends State<Dashboard> {
       debugPrint('✅ Loaded ${purchasedCategoryIds.length} purchased bundles: $purchasedCategoryIds');
     } catch (e) {
       debugPrint('Error loading user bundles: $e');
+    }
+  }
+
+  Future<void> _loadUnreadNotificationCount() async {
+    if (_userId == null) return;
+    
+    try {
+      final response = await _api.fetchNotificationsHistory(_userId!);
+      if (!mounted) return;
+      
+      final unreadCount = response.data.where((n) => !n.isRead).length;
+      setState(() {
+        _unreadNotificationCount = unreadCount;
+      });
+      
+      debugPrint('✅ Loaded unread notifications count: $unreadCount');
+    } catch (e) {
+      debugPrint('Error loading unread notifications: $e');
     }
   }
 
@@ -2322,34 +2346,6 @@ class _DashboardState extends State<Dashboard> {
                     ),
                     const SizedBox(width: 10),
 
-                    // Cart Icon
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => const CartScreen(),
-                          ),
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.25),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.shopping_cart_outlined,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    
                     // Language Icon
                     GestureDetector(
                       onTap: () {
@@ -2374,52 +2370,56 @@ class _DashboardState extends State<Dashboard> {
                     ),
                     const SizedBox(width: 10),
                     
-                    // Notification Icon with badge - Hidden for now
-                    // GestureDetector(
-                    //   onTap: () {
-                    //     Navigator.of(context).push(
-                    //       MaterialPageRoute(
-                    //         builder: (context) => const NotificationScreen(),
-                    //       ),
-                    //     );
-                    //   },
-                    //   child: Stack(
-                    //     children: [
-                    //       Container(
-                    //         padding: const EdgeInsets.all(10),
-                    //         decoration: BoxDecoration(
-                    //           color: Colors.white.withOpacity(0.25),
-                    //           borderRadius: BorderRadius.circular(12),
-                    //           border: Border.all(
-                    //             color: Colors.white.withOpacity(0.3),
-                    //             width: 1,
-                    //           ),
-                    //         ),
-                    //         child: const Icon(
-                    //           Icons.notifications_outlined,
-                    //           color: Colors.white,
-                    //           size: 20,
-                    //         ),
-                    //       ),
-                    //       Positioned(
-                    //         top: 8,
-                    //         right: 8,
-                    //         child: Container(
-                    //           width: 8,
-                    //           height: 8,
-                    //           decoration: BoxDecoration(
-                    //             color: const Color(0xFFFF4444),
-                    //             shape: BoxShape.circle,
-                    //             border: Border.all(
-                    //               color: Colors.white,
-                    //               width: 1.5,
-                    //             ),
-                    //           ),
-                    //         ),
-                    //       ),
-                    //     ],
-                    //   ),
-                    // ),
+                    // Notification Icon with badge
+                    GestureDetector(
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const NotificationScreen(),
+                          ),
+                        );
+                        // Reload unread count when returning from notification screen
+                        _loadUnreadNotificationCount();
+                      },
+                      child: Stack(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.25),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.notifications_outlined,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                          // Only show badge if there are unread notifications
+                          if (_unreadNotificationCount > 0)
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFF4444),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ],

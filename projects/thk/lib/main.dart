@@ -3,10 +3,51 @@ import 'dart:async';
 import 'screens/splash_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'config/api_config.dart';
+
+// Handle background notifications
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  print('📬 Background notification received:');
+  print('   Title: ${message.notification?.title}');
+  print('   Body: ${message.notification?.body}');
+  print('   Data: ${message.data}');
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase (with error handling)
+  try {
+    await Firebase.initializeApp();
+    print('✅ Firebase initialized successfully');
+  } catch (e) {
+    print('⚠️ Firebase initialization failed: $e');
+    // Continue app execution even if Firebase fails
+  }
+  
+  // Set up background notification handler
+  try {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    print('✅ Background notification handler registered');
+  } catch (e) {
+    print('⚠️ Failed to register background handler: $e');
+  }
+  
+  // Request notification permissions and log FCM token
+  try {
+    final messaging = FirebaseMessaging.instance;
+    final settings = await messaging.requestPermission();
+    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+      final token = await messaging.getToken();
+      print('📲 FCM TOKEN: ${token ?? 'unavailable'}');
+    } else {
+      print('⚠️ Notifications denied. Skipping FCM token retrieval.');
+    }
+  } catch (e) {
+    print('⚠️ Failed to fetch FCM token: $e');
+  }
   
   // Lock app to portrait orientation only
   await SystemChrome.setPreferredOrientations([
@@ -23,8 +64,48 @@ Future<void> main() async {
   runApp(const ThinkCyberApp());
 }
 
-class ThinkCyberApp extends StatelessWidget {
+class ThinkCyberApp extends StatefulWidget {
   const ThinkCyberApp({super.key});
+
+  @override
+  State<ThinkCyberApp> createState() => _ThinkCyberAppState();
+}
+
+class _ThinkCyberAppState extends State<ThinkCyberApp> {
+  @override
+  void initState() {
+    super.initState();
+    _setupForegroundNotificationHandler();
+  }
+
+  void _setupForegroundNotificationHandler() {
+    // Handle foreground notifications
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('📨 Foreground notification received:');
+      print('   Title: ${message.notification?.title}');
+      print('   Body: ${message.notification?.body}');
+      print('   Data: ${message.data}');
+      
+      // Show a snackbar or dialog when notification arrives in foreground
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message.notification?.body ?? 'New notification'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
+    
+    // Handle notification taps
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      print('🎯 Notification tapped:');
+      print('   Title: ${message.notification?.title}');
+      print('   Body: ${message.notification?.body}');
+      print('   Data: ${message.data}');
+      // Handle navigation based on notification data
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

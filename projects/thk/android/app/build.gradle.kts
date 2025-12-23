@@ -3,11 +3,12 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services")
 }
 
 android {
 
-    namespace = "com.example.demo"
+    namespace = "com.edu.thinkcyber"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
@@ -21,12 +22,12 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.demo" // Replace with your app's package name
+        applicationId = "com.edu.thinkcyber"
         minSdk = flutter.minSdkVersion
         targetSdk = 33
         versionCode = 1
         versionName = "1.0"
-        manifestPlaceholders["appAuthRedirectScheme"] = "myapp"
+        manifestPlaceholders["appAuthRedirectScheme"] = "thinkcyber"
     }
     buildTypes {
         release {

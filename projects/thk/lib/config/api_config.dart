@@ -20,7 +20,7 @@ class ApiConfig {
     ApiEnvironment.development: EnvironmentConfig(
       name: 'Development',
       //baseUrl: 'https://api.thinkcyber.info/api',
-      baseUrl: 'http://10.20.0.9:8082/api', 
+      baseUrl: 'http://192.168.29.82:8082/api', 
       timeout: Duration(seconds: 30),
       enableLogging: true,
     ),
@@ -68,6 +68,9 @@ class ApiConfig {
   static const String authLogout = '/auth/logout';
   static const String authRefreshToken = '/auth/refresh-token';
   static const String authCloseAccount = '/auth/close-account';
+  
+  /// App Settings endpoints
+  static const String appSettingsVersion = '/app-settings/version';
   
   /// Topics/Courses endpoints
   static const String topicsList = '/topics';
@@ -121,6 +124,20 @@ class ApiConfig {
   /// Legal documents endpoints
   static const String privacy = '/privacy';
   static const String terms = '/terms';
+  
+  /// Notifications endpoints
+  static const String notificationsHistory = '/notifications/history';
+  static const String notificationsMarkRead = '/notifications/mark-read';
+  static const String notificationsMarkAllRead = '/notifications/mark-all-read';
+  
+  /// Get notifications history with userId
+  static String notificationsHistoryWithUserId(int userId) => '$notificationsHistory/$userId';
+  
+  /// Mark single notification as read
+  static String notificationsMarkReadWithId(int notificationId) => '$notificationsMarkRead/$notificationId';
+  
+  /// Mark all notifications as read for a user
+  static String notificationsMarkAllReadWithUserId(int userId) => '$notificationsMarkAllRead/$userId';
   
   // ==================== THIRD-PARTY API CONFIGURATIONS ====================
   

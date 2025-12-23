@@ -10,6 +10,16 @@ class ThinkCyberApi {
 
   final http.Client _client;
 
+  Future<AppVersionResponse> checkAppVersion({
+    required int currentVersionCode,
+    required String platform,
+  }) async {
+    final path =
+        '${ApiConfig.appSettingsVersion}?platform=$platform&currentVersionCode=$currentVersionCode';
+    final json = await _getJson(path);
+    return AppVersionResponse.fromJson(json);
+  }
+
   Future<SignupResponse> signup({
     required String email,
     required String firstName,
@@ -36,10 +46,21 @@ class ThinkCyberApi {
   Future<LoginVerificationResponse> verifyLoginOtp({
     required String email,
     required String otp,
+    String? fcmToken,
+    String? deviceId,
+    String? deviceName,
   }) async {
+    final payload = {
+      'email': email,
+      'otp': otp,
+      if (fcmToken != null) 'fcmToken': fcmToken,
+      if (deviceId != null) 'deviceId': deviceId,
+      if (deviceName != null) 'deviceName': deviceName,
+    };
+    _log('📤 verifyLoginOtp payload: $payload');
     return _postJson(
       path: ApiConfig.authVerifyLoginOtp,
-      payload: {'email': email, 'otp': otp},
+      payload: payload,
     ).then(LoginVerificationResponse.fromJson);
   }
 
@@ -428,6 +449,38 @@ class ThinkCyberApi {
     );
   }
 
+  Future<Map<String, dynamic>> _putJson({
+    required String path,
+    required Map<String, dynamic> payload,
+  }) async {
+    final fullUrl = ApiConfig.buildUrl(path);
+    final uri = Uri.parse(fullUrl);
+
+    _log('📤 PUT Request → $path');
+    _log('🔗 Full URL → $fullUrl');
+    _log('📦 Payload → ${jsonEncode(payload)}');
+
+    final response = await _client.put(
+      uri,
+      headers: ApiConfig.defaultHeaders,
+      body: jsonEncode(payload),
+    );
+
+    _log(
+      '📥 Response ← ${response.statusCode} $path ${_truncateResponse(response.body)}',
+      isError: response.statusCode >= 400,
+    );
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+
+    throw ApiException(
+      message: _extractErrorMessage(response.body),
+      statusCode: response.statusCode,
+    );
+  }
+
   Future<Map<String, dynamic>> _getJson(String path) async {
     final fullUrl = ApiConfig.buildUrl(path);
     final uri = Uri.parse(fullUrl);
@@ -549,6 +602,27 @@ class ThinkCyberApi {
   Future<TermsAndConditionsResponse> fetchTermsAndConditions() async {
     final json = await _getJson(ApiConfig.terms);
     return TermsAndConditionsResponse.fromJson(json);
+  }
+
+  Future<NotificationsHistoryResponse> fetchNotificationsHistory(int userId) async {
+    final json = await _getJson(ApiConfig.notificationsHistoryWithUserId(userId));
+    return NotificationsHistoryResponse.fromJson(json);
+  }
+
+  Future<GenericResponse> markNotificationAsRead(int notificationId) async {
+    final json = await _putJson(
+      path: ApiConfig.notificationsMarkReadWithId(notificationId),
+      payload: {},
+    );
+    return GenericResponse.fromJson(json);
+  }
+
+  Future<GenericResponse> markAllNotificationsAsRead(int userId) async {
+    final json = await _putJson(
+      path: ApiConfig.notificationsMarkAllReadWithUserId(userId),
+      payload: {},
+    );
+    return GenericResponse.fromJson(json);
   }
 }
 
@@ -1631,6 +1705,157 @@ class TermsAndConditions {
       effectiveDate: json['effectiveDate'] as String? ?? '',
       createdAt: json['createdAt'] as String? ?? '',
       updatedAt: json['updatedAt'] as String? ?? '',
+    );
+  }
+}
+
+class AppVersionResponse {
+  AppVersionResponse({
+    required this.success,
+    required this.message,
+    this.data,
+  });
+
+  final bool success;
+  final String message;
+  final AppVersionInfo? data;
+
+  factory AppVersionResponse.fromJson(Map<String, dynamic> json) {
+    return AppVersionResponse(
+      success: json['success'] == true,
+      message: json['message'] as String? ?? '',
+      data: json['data'] != null
+          ? AppVersionInfo.fromJson(json['data'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+}
+
+class AppVersionInfo {
+  AppVersionInfo({
+    required this.message,
+    required this.forceUpdate,
+    required this.updateRequired,
+    required this.minVersionCode,
+    required this.latestVersionCode,
+    this.latestVersionName,
+    this.iosStoreUrl,
+    this.androidStoreUrl,
+  });
+
+  final String message;
+  final bool forceUpdate;
+  final bool updateRequired;
+  final int minVersionCode;
+  final int latestVersionCode;
+  final String? latestVersionName;
+  final String? iosStoreUrl;
+  final String? androidStoreUrl;
+
+  factory AppVersionInfo.fromJson(Map<String, dynamic> json) {
+    return AppVersionInfo(
+      message: json['message'] as String? ?? '',
+      forceUpdate: json['forceUpdate'] == true,
+      updateRequired: json['updateRequired'] == true,
+      minVersionCode: (json['minVersionCode'] as num?)?.toInt() ?? 0,
+      latestVersionCode: (json['latestVersionCode'] as num?)?.toInt() ?? 0,
+      latestVersionName: json['latestVersionName'] as String?,
+      iosStoreUrl: json['iosStoreUrl'] as String?,
+      androidStoreUrl: json['androidStoreUrl'] as String?,
+    );
+  }
+}
+
+class NotificationsHistoryResponse {
+  NotificationsHistoryResponse({
+    required this.success,
+    required this.data,
+    this.total,
+    this.unreadCount,
+    this.limit,
+    this.offset,
+  });
+
+  final bool success;
+  final List<NotificationData> data;
+  final int? total;
+  final int? unreadCount;
+  final int? limit;
+  final int? offset;
+
+  factory NotificationsHistoryResponse.fromJson(Map<String, dynamic> json) {
+    final dataList = json['data'] as List<dynamic>? ?? [];
+    return NotificationsHistoryResponse(
+      success: json['success'] as bool? ?? false,
+      data: dataList
+          .map((item) => NotificationData.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      total: json['total'] as int?,
+      unreadCount: json['unreadCount'] as int?,
+      limit: json['limit'] as int?,
+      offset: json['offset'] as int?,
+    );
+  }
+}
+
+class NotificationData {
+  NotificationData({
+    required this.id,
+    required this.title,
+    required this.message,
+    required this.type,
+    required this.isRead,
+    required this.createdAt,
+    this.icon,
+    this.status,
+    this.data,
+  });
+
+  final int id;
+  final String title;
+  final String message;
+  final String type;
+  final bool isRead;
+  final String createdAt;
+  final String? icon;
+  final String? status;
+  final Map<String, dynamic>? data;
+
+  factory NotificationData.fromJson(Map<String, dynamic> json) {
+    return NotificationData(
+      id: json['id'] as int? ?? 0,
+      title: json['title'] as String? ?? '',
+      message: json['message'] as String? ?? '',
+      type: json['type'] as String? ?? 'info',
+      isRead: json['isRead'] as bool? ?? false,
+      createdAt: json['createdAt'] as String? ?? '',
+      icon: json['icon'] as String?,
+      status: json['status'] as String?,
+      data: json['data'] as Map<String, dynamic>?,
+    );
+  }
+
+  NotificationData copyWith({
+    int? id,
+    String? title,
+    String? message,
+    String? type,
+    bool? isRead,
+    String? createdAt,
+    String? icon,
+    String? status,
+    Map<String, dynamic>? data,
+  }) {
+    return NotificationData(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      message: message ?? this.message,
+      type: type ?? this.type,
+      isRead: isRead ?? this.isRead,
+      createdAt: createdAt ?? this.createdAt,
+      icon: icon ?? this.icon,
+      status: status ?? this.status,
+      data: data ?? this.data,
     );
   }
 }

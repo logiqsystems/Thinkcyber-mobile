@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -699,9 +702,26 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> with Tick
           Navigator.of(context).pop(true);
         }
       } else {
+        final fcmToken = await _fetchFcmToken();
+        final deviceId = await _fetchDeviceId();
+        final deviceName = await _fetchDeviceName();
+        
+        // Debug logging - showing what will be sent
+        debugPrint('═══════════════════════════════════════════');
+        debugPrint('🔐 OTP Login Verification Data:');
+        debugPrint('   Email: ${widget.email}');
+        debugPrint('   OTP: ${_otpController.text.trim()}');
+        debugPrint('   FCM Token: ${fcmToken ?? '❌ NULL (notifications disabled?)'}');
+        debugPrint('   Device ID: ${deviceId ?? '❌ NULL'}');
+        debugPrint('   Device Name: ${deviceName ?? '❌ NULL'}');
+        debugPrint('═══════════════════════════════════════════');
+        
         final response = await _api.verifyLoginOtp(
           email: widget.email,
           otp: _otpController.text.trim(),
+          fcmToken: fcmToken,
+          deviceId: deviceId,
+          deviceName: deviceName,
         );
 
         if (!mounted) return;
@@ -750,6 +770,81 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> with Tick
       if (mounted) {
         setState(() => _isResending = false);
       }
+    }
+  }
+
+  Future<String?> _fetchFcmToken() async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+      
+      // Request permission
+      final settings = await messaging.requestPermission(
+        alert: true,
+        announcement: true,
+        badge: true,
+        sound: true,
+      );
+      
+      debugPrint('📱 Notification permission status: ${settings.authorizationStatus}');
+      
+      if (settings.authorizationStatus != AuthorizationStatus.authorized) {
+        debugPrint('⚠️ Notifications not authorized. Status: ${settings.authorizationStatus}');
+        return null;
+      }
+      
+      final token = await messaging.getToken();
+      if (token != null) {
+        debugPrint('✅ FCM TOKEN OBTAINED: $token');
+      } else {
+        debugPrint('❌ FCM TOKEN IS NULL');
+      }
+      return token;
+    } catch (e) {
+      debugPrint('❌ Failed to fetch FCM token: $e');
+      return null;
+    }
+  }
+
+  Future<String?> _fetchDeviceId() async {
+    try {
+      final info = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        final androidInfo = await info.androidInfo;
+        debugPrint('✅ Android Device ID: ${androidInfo.id}');
+        return androidInfo.id;
+      } else if (Platform.isIOS) {
+        final iosInfo = await info.iosInfo;
+        final vendorId = iosInfo.identifierForVendor;
+        debugPrint('✅ iOS Device ID: $vendorId');
+        return vendorId;
+      }
+      debugPrint('⚠️ Unsupported platform for device ID');
+      return null;
+    } catch (e) {
+      debugPrint('❌ Failed to fetch device ID: $e');
+      return null;
+    }
+  }
+
+  Future<String?> _fetchDeviceName() async {
+    try {
+      final info = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        final androidInfo = await info.androidInfo;
+        final deviceName = '${androidInfo.brand} ${androidInfo.model}';
+        debugPrint('✅ Android Device Name: $deviceName');
+        return deviceName;
+      } else if (Platform.isIOS) {
+        final iosInfo = await info.iosInfo;
+        final deviceName = iosInfo.utsname.machine;
+        debugPrint('✅ iOS Device Name: $deviceName');
+        return deviceName;
+      }
+      debugPrint('⚠️ Unsupported platform for device name');
+      return null;
+    } catch (e) {
+      debugPrint('❌ Failed to fetch device name: $e');
+      return null;
     }
   }
 
