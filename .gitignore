@@ -1,3 +1,17 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
 # Docker and shell scripts (not needed in Flutter app repo)
 Dockerfile
 docker-compose.yml
@@ -12,49 +26,73 @@ flutter-new.code-workspace
 projects/assets/
 projects/plant_disease_app/
 
-# Flutter/Dart common ignores
-**/.dart_tool/
-**/.flutter-plugins
-**/.flutter-plugins-dependencies
-**/build/
-**/.pub-cache/
-**/.pub/
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Flutter/Dart/Pub related
 **/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+**/build/
 
-# IDE
-**/*.iml
-**/*.ipr
-**/*.iws
-**/.idea/
+# Symbolication related
+app.*.symbols
 
-# macOS
-.DS_Store
-**/.DS_Store
+# Obfuscation related
+app.*.map.json
 
-# Generated
-**/*.g.dart
-**/*.freezed.dart
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
 
-# iOS
+# Generated files
+*.g.dart
+*.freezed.dart
+*.gr.dart
+
+# iOS specific
 **/ios/Pods/
 **/ios/.symlinks/
 **/ios/Flutter/Flutter.framework
 **/ios/Flutter/Flutter.podspec
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
 
-# Android
-**/.gradle/
-**/local.properties
-**/key.properties
+# Android specific  
+**/android/.gradle/
+**/android/local.properties
+**/android/key.properties
 **/*.keystore
 **/android/app/build/
 **/android/build/
 
-# Platform ephemeral
+# macOS specific
+**/macos/Pods/
 **/macos/Flutter/ephemeral/
+
+# Windows specific
 **/windows/flutter/ephemeral/
+
+# Linux specific
 **/linux/flutter/ephemeral/
 
-# Temp files
-**/temp_*.dart
-**/original/
-**/store_assets/
+# Web specific
+**/web/favicon.png
+
+# Lock files (optional - uncomment if you don't want to track)
+# pubspec.lock
+
+# Store assets and temp files
+store_assets/
+original/
+temp_*.dart
+*.md.bak
