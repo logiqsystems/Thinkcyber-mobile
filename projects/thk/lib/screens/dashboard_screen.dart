@@ -892,7 +892,7 @@ class _DashboardState extends State<Dashboard> {
         'light': const Color(0xFFFEF3C7),
       },
       'FLEXIBLE': {
-        'primary': const Color(0xFF6366F1),
+        'primary': const Color(0xFF3B83FF),
         'light': const Color(0xFFEEF2FF),
       },
     };
@@ -1385,7 +1385,7 @@ class _DashboardState extends State<Dashboard> {
                           const Icon(
                             Icons.tune_rounded,
                             size: 16,
-                            color: Color(0xFF6366F1),
+                            color: Color(0xFF3B83FF),
                           ),
                           const SizedBox(width: 4),
                           TranslatedText(
@@ -1393,7 +1393,7 @@ class _DashboardState extends State<Dashboard> {
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFF6366F1),
+                              color: Color(0xFF3B83FF),
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -1965,7 +1965,7 @@ class _DashboardState extends State<Dashboard> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF4F46E5),
+                              color: const Color(0xFF2563EB),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: TranslatedText(
@@ -2137,8 +2137,8 @@ class _DashboardState extends State<Dashboard> {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFF6366F1),
-              const Color(0xFF4F46E5),
+              const Color(0xFF3B83FF),
+              const Color(0xFF2563EB),
             ],
           ),
           borderRadius: BorderRadius.circular(16),
@@ -2174,7 +2174,7 @@ class _DashboardState extends State<Dashboard> {
     final colors = {
       PlanType.free: const Color(0xFF10B981),
       PlanType.bundleOnly: const Color(0xFF0EA5E9),
-      PlanType.flexible: const Color(0xFF6366F1),
+      PlanType.flexible: const Color(0xFF3B83FF),
       PlanType.individualOnly: const Color(0xFFF59E0B),
     };
 
@@ -2270,8 +2270,8 @@ class _DashboardState extends State<Dashboard> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            const Color(0xFF6366F1), // Purple-blue
-            const Color(0xFF4F46E5), // Indigo
+            const Color(0xFF3B83FF), // Purple-blue
+            const Color(0xFF2563EB), // Indigo
             const Color(0xFF2563EB), // Blue
           ],
         ),
@@ -2506,7 +2506,7 @@ class _DashboardState extends State<Dashboard> {
                   ),
                   prefixIcon: const Icon(
                     Icons.search,
-                    color: Color(0xFF6366F1),
+                    color: Color(0xFF3B83FF),
                     size: 22,
                   ),
                   suffixIcon: _searchQuery.isNotEmpty

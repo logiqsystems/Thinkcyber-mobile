@@ -20,7 +20,7 @@ class ApiConfig {
     ApiEnvironment.development: EnvironmentConfig(
       name: 'Development',
       baseUrl: 'https://api.thinkcyber.info/api',
-      //baseUrl: 'http://192.168.29.82:8082/api', 
+      //baseUrl: 'http://10.20.0.9:8082/api', 
       timeout: Duration(seconds: 30),
       enableLogging: true,
     ),

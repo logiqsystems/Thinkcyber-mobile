@@ -576,7 +576,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
               icon: Icons.tune_rounded,
               title: 'Flexible Plans',
               count: flexibleBundleEnrollments.length,
-              color: const Color(0xFF6366F1),
+              color: const Color(0xFF3B83FF),
             ),
             const SizedBox(height: 16),
             ..._buildFlexibleBundleCards(flexibleBundleEnrollments),
@@ -602,7 +602,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
               icon: Icons.article_outlined,
               title: 'Individual Topics',
               count: individualEnrollments.length,
-              color: const Color(0xFF6366F1),
+              color: const Color(0xFF3B83FF),
             ),
             const SizedBox(height: 16),
             ..._buildIndividualCards(individualEnrollments),
@@ -619,15 +619,15 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF6366F1),
-            Color(0xFF4F46E5),
+            Color(0xFF3B83FF),
+            Color(0xFF2563EB),
             Color(0xFF2563EB),
           ],
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6366F1).withOpacity(0.3),
+            color: const Color(0xFF3B83FF).withOpacity(0.3),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -1328,7 +1328,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
   // Build cards from UserBundle data for FLEXIBLE plan type
   List<Widget> _buildFlexibleBundleCards(List<UserBundle> bundles) {
     return bundles.map((bundle) {
-      return _buildBundleCard(bundle, const Color(0xFF6366F1), 'FLEXIBLE');
+      return _buildBundleCard(bundle, const Color(0xFF3B83FF), 'FLEXIBLE');
     }).toList();
   }
 
@@ -1622,7 +1622,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
               height: 48,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
-                  colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+                  colors: [Color(0xFF3B83FF), Color(0xFF2563EB)],
                 ),
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -1660,7 +1660,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF6366F1),
+                        color: Color(0xFF3B83FF),
                       ),
                     ),
                   ),

@@ -6,6 +6,7 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../config/razorpay_config.dart';
 import '../services/api_client.dart';
@@ -562,10 +563,20 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
     if (isFreeCourse) {
       setState(() => _processingCheckout = true);
       try {
+        // Get FCM token for notification
+        String? fcmToken;
+        try {
+          fcmToken = await FirebaseMessaging.instance.getToken();
+          debugPrint('📲 FCM Token for enrollment: ${fcmToken != null ? '✅ Obtained' : '❌ NULL'}');
+        } catch (e) {
+          debugPrint('⚠️ Failed to get FCM token: $e');
+        }
+        
         final response = await _api.enrollFreeCourse(
           userId: userId,
           topicId: detail.id,
           email: email,
+          fcmToken: fcmToken,
         );
 
         if (response.success) {

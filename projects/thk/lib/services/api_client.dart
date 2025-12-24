@@ -57,11 +57,23 @@ class ThinkCyberApi {
       if (deviceId != null) 'deviceId': deviceId,
       if (deviceName != null) 'deviceName': deviceName,
     };
-    _log('📤 verifyLoginOtp payload: $payload');
-    return _postJson(
+    _log('═══════════════════════════════════════════');
+    _log('📤 verifyLoginOtp REQUEST');
+    _log('   Endpoint: ${ApiConfig.authVerifyLoginOtp}');
+    _log('   Payload: $payload');
+    _log('═══════════════════════════════════════════');
+    
+    final json = await _postJson(
       path: ApiConfig.authVerifyLoginOtp,
       payload: payload,
-    ).then(LoginVerificationResponse.fromJson);
+    );
+    
+    _log('═══════════════════════════════════════════');
+    _log('📥 verifyLoginOtp RESPONSE (raw JSON):');
+    _log('   $json');
+    _log('═══════════════════════════════════════════');
+    
+    return LoginVerificationResponse.fromJson(json);
   }
 
   Future<GenericResponse> sendLoginOtp({required String email}) async {
@@ -285,16 +297,33 @@ class ThinkCyberApi {
     required int userId,
     required int topicId,
     required String email,
+    String? fcmToken,
   }) async {
+    final payload = {
+      'userId': userId,
+      'topicId': topicId,
+      'email': email,
+      'currency': 'INR',
+      if (fcmToken != null) 'fcmToken': fcmToken,
+    };
+    
+    _log('═══════════════════════════════════════════');
+    _log('📤 enrollFreeCourse REQUEST');
+    _log('   Endpoint: ${ApiConfig.enrollmentsEnroll}');
+    _log('   User ID: $userId');
+    _log('   Topic ID: $topicId');
+    _log('   FCM Token: ${fcmToken != null ? '✅ Included' : '❌ Not included'}');
+    _log('═══════════════════════════════════════════');
+    
     final json = await _postJson(
       path: ApiConfig.enrollmentsEnroll,
-      payload: {
-        'userId': userId,
-        'topicId': topicId,
-        'email': email,
-        'currency': 'INR',
-      },
+      payload: payload,
     );
+    
+    _log('═══════════════════════════════════════════');
+    _log('📥 enrollFreeCourse RESPONSE');
+    _log('   $json');
+    _log('═══════════════════════════════════════════');
 
     return GenericResponse.fromJson(json);
   }

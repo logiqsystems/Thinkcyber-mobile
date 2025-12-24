@@ -82,7 +82,7 @@ class PlanDisplayWidget extends StatelessWidget {
     final colors = {
       PlanType.free: const Color(0xFF10B981),
       PlanType.bundleOnly: const Color(0xFF0EA5E9),
-      PlanType.flexible: const Color(0xFF4F46E5),
+      PlanType.flexible: const Color(0xFF2563EB),
       PlanType.individualOnly: const Color(0xFFF59E0B),
     };
 

@@ -221,7 +221,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       child: const Icon(
                         Icons.open_in_new,
                         size: 18,
-                        color: Color(0xFF6366F1),
+                        color: Color(0xFF3B83FF),
                       ),
                     ),
                   ],
@@ -461,7 +461,7 @@ class _AccountScreenState extends State<AccountScreen> {
       appBar: AppBar(
         title: const TranslatedText('Profile'),
         elevation: 0,
-        backgroundColor: const Color(0xFF6366F1),
+        backgroundColor: const Color(0xFF3B83FF),
         foregroundColor: Colors.white,
       ),
       body: Container(
@@ -470,7 +470,7 @@ class _AccountScreenState extends State<AccountScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF6366F1),
+              Color(0xFF3B83FF),
               Color(0xFFF5F7FA),
             ],
             stops: [0.0, 0.3],
@@ -500,41 +500,35 @@ class _AccountScreenState extends State<AccountScreen> {
                       ),
                       child: Column(
                         children: [
-                          // App Icon as Profile Picture
+                          // App Icon as Profile Picture - Rounded Rectangle
                           Container(
                             width: 100,
                             height: 100,
                             decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: LinearGradient(
-                                colors: [
-                                  const Color(0xFF6366F1).withOpacity(0.1),
-                                  const Color(0xFF8B5CF6).withOpacity(0.1),
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
+                              borderRadius: BorderRadius.circular(20),
+                              color: Colors.white,
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF6366F1).withOpacity(0.2),
+                                  color: const Color(0xFF3B83FF).withOpacity(0.15),
                                   blurRadius: 12,
                                   offset: const Offset(0, 4),
                                 ),
                               ],
                             ),
-                            child: ClipOval(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
                               child: Image.asset(
                                 'Asset/appIcon.png',
                                 width: 100,
-                                height: 100 ,
+                                height: 100,
                                 fit: BoxFit.cover,
                                 errorBuilder: (context, error, stackTrace) {
                                   return Container(
-                                    color: const Color(0xFF6366F1).withOpacity(0.1),
+                                    color: const Color(0xFF3B83FF).withOpacity(0.1),
                                     child: const Icon(
                                       Icons.person,
                                       size: 50,
-                                      color: Color(0xFF6366F1),
+                                      color: Color(0xFF3B83FF),
                                     ),
                                   );
                                 },
@@ -557,7 +551,7 @@ class _AccountScreenState extends State<AccountScreen> {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF6366F1).withOpacity(0.1),
+                              color: const Color(0xFF3B83FF).withOpacity(0.1),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
@@ -565,7 +559,7 @@ class _AccountScreenState extends State<AccountScreen> {
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w500,
-                                color: Color(0xFF6366F1),
+                                color: Color(0xFF3B83FF),
                               ),
                             ),
                           ),

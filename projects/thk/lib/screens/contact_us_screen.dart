@@ -85,7 +85,7 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
       appBar: AppBar(
         title: const TranslatedText('Contact Us'),
         elevation: 0,
-        backgroundColor: const Color(0xFF6366F1),
+        backgroundColor: const Color(0xFF3B83FF),
         foregroundColor: Colors.white,
       ),
       body: Container(
@@ -94,7 +94,7 @@ class _ContactUsScreenState extends State<ContactUsScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF6366F1),
+              Color(0xFF3B83FF),
               Color(0xFFF5F7FA),
             ],
             stops: [0.0, 0.3],

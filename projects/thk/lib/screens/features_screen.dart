@@ -64,7 +64,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         centerTitle: true,
-        backgroundColor: const Color(0xFF6366F1),
+        backgroundColor: const Color(0xFF3B83FF),
         elevation: 0,
         automaticallyImplyLeading: false,
       ),
@@ -74,7 +74,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF6366F1),
+              Color(0xFF3B83FF),
               Color(0xFFF5F7FA),
             ],
             stops: [0.0, 0.3],
@@ -164,7 +164,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
     final colors = {
       PlanType.free: const Color(0xFF10B981),
       PlanType.bundleOnly: const Color(0xFF0EA5E9),
-      PlanType.flexible: const Color(0xFF4F46E5),
+      PlanType.flexible: const Color(0xFF2563EB),
       PlanType.individualOnly: const Color(0xFFF59E0B),
     };
 
@@ -364,7 +364,7 @@ class _FeaturesScreenState extends State<FeaturesScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('${plan.name} selected ($type)'),
-        backgroundColor: const Color(0xFF6366F1),
+        backgroundColor: const Color(0xFF3B83FF),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),

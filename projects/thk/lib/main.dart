@@ -1,14 +1,30 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'screens/splash_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'config/api_config.dart';
+
+// Flutter Local Notifications plugin instance
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+// Android notification channel
+const AndroidNotificationChannel channel = AndroidNotificationChannel(
+  'high_importance_channel', // id - must match AndroidManifest
+  'High Importance Notifications', // title
+  description: 'This channel is used for important notifications.',
+  importance: Importance.high,
+  playSound: true,
+);
 
 // Handle background notifications
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
   print('📬 Background notification received:');
   print('   Title: ${message.notification?.title}');
   print('   Body: ${message.notification?.body}');
@@ -27,6 +43,36 @@ Future<void> main() async {
     // Continue app execution even if Firebase fails
   }
   
+  // Initialize Flutter Local Notifications
+  try {
+    // Create Android notification channel
+    if (Platform.isAndroid) {
+      await flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+      print('✅ Android notification channel created');
+    }
+    
+    // Initialize local notifications
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const DarwinInitializationSettings initializationSettingsIOS =
+        DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+    const InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+      iOS: initializationSettingsIOS,
+    );
+    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+    print('✅ Flutter Local Notifications initialized');
+  } catch (e) {
+    print('⚠️ Failed to initialize local notifications: $e');
+  }
+  
   // Set up background notification handler
   try {
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
@@ -38,10 +84,28 @@ Future<void> main() async {
   // Request notification permissions and log FCM token
   try {
     final messaging = FirebaseMessaging.instance;
-    final settings = await messaging.requestPermission();
+    final settings = await messaging.requestPermission(
+      alert: true,
+      announcement: false,
+      badge: true,
+      carPlay: false,
+      criticalAlert: false,
+      provisional: false,
+      sound: true,
+    );
+    print('📱 Notification permission status: ${settings.authorizationStatus}');
+    
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
       final token = await messaging.getToken();
       print('📲 FCM TOKEN: ${token ?? 'unavailable'}');
+      
+      // Set foreground notification presentation options
+      await messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      print('✅ Foreground notification options set');
     } else {
       print('⚠️ Notifications denied. Skipping FCM token retrieval.');
     }
@@ -79,30 +143,54 @@ class _ThinkCyberAppState extends State<ThinkCyberApp> {
   }
 
   void _setupForegroundNotificationHandler() {
-    // Handle foreground notifications
+    // Handle foreground notifications - show local notification
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('📨 Foreground notification received:');
+      print('═══════════════════════════════════════════');
+      print('📨 FOREGROUND NOTIFICATION RECEIVED:');
       print('   Title: ${message.notification?.title}');
       print('   Body: ${message.notification?.body}');
       print('   Data: ${message.data}');
+      print('═══════════════════════════════════════════');
       
-      // Show a snackbar or dialog when notification arrives in foreground
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message.notification?.body ?? 'New notification'),
-            duration: const Duration(seconds: 3),
+      final notification = message.notification;
+      final android = message.notification?.android;
+      
+      // Show local notification when app is in foreground
+      if (notification != null) {
+        flutterLocalNotificationsPlugin.show(
+          notification.hashCode,
+          notification.title,
+          notification.body,
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              channel.id,
+              channel.name,
+              channelDescription: channel.description,
+              importance: Importance.high,
+              priority: Priority.high,
+              icon: '@mipmap/ic_launcher',
+              playSound: true,
+            ),
+            iOS: const DarwinNotificationDetails(
+              presentAlert: true,
+              presentBadge: true,
+              presentSound: true,
+            ),
           ),
+          payload: message.data.toString(),
         );
+        print('✅ Local notification displayed');
       }
     });
     
-    // Handle notification taps
+    // Handle notification taps (when app is in background and user taps)
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      print('🎯 Notification tapped:');
+      print('═══════════════════════════════════════════');
+      print('🎯 NOTIFICATION TAPPED:');
       print('   Title: ${message.notification?.title}');
       print('   Body: ${message.notification?.body}');
       print('   Data: ${message.data}');
+      print('═══════════════════════════════════════════');
       // Handle navigation based on notification data
     });
   }

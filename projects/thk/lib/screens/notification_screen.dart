@@ -483,7 +483,7 @@ class _NotificationCard extends StatelessWidget {
       case NotificationType.reminder:
         return const Color(0xFFFF9500);
       case NotificationType.payment:
-        return const Color(0xFF8B5CF6);
+        return const Color(0xFF60A5FA);
       case NotificationType.achievement:
         return const Color(0xFFFFD700);
       case NotificationType.update:

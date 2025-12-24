@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 // Default gradient for all topics
 LinearGradient topicGradientFor(String seed) {
   return const LinearGradient(
-    colors: [Color(0xFF4F46E5), Color(0xFF6366F1)],
+    colors: [Color(0xFF2563EB), Color(0xFF3B83FF)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -40,7 +40,7 @@ class TopicThumbnailFallback extends StatelessWidget {
             errorBuilder: (context, error, stackTrace) {
               // Ultimate fallback to a simple colored container with icon
               return Container(
-                color: const Color(0xFF4F46E5),
+                color: const Color(0xFF2563EB),
                 child: const Center(
                   child: Icon(
                     Icons.image,

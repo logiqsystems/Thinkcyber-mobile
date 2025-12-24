@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../config/razorpay_config.dart';
 import '../services/api_client.dart';
@@ -199,6 +200,15 @@ class _CartScreenState extends State<CartScreen> {
       final freeCourses = _cartService.items.where((item) => item.isFree || item.price == 0).toList();
       final paidCourses = _cartService.items.where((item) => !item.isFree && item.price > 0).toList();
 
+      // Get FCM token for notifications
+      String? fcmToken;
+      try {
+        fcmToken = await FirebaseMessaging.instance.getToken();
+        debugPrint('📲 FCM Token for cart enrollment: ${fcmToken != null ? '✅ Obtained' : '❌ NULL'}');
+      } catch (e) {
+        debugPrint('⚠️ Failed to get FCM token: $e');
+      }
+
       // Enroll in all free courses first
       for (final item in freeCourses) {
         try {
@@ -206,6 +216,7 @@ class _CartScreenState extends State<CartScreen> {
             userId: _userId!,
             topicId: item.id,
             email: _userEmail!,
+            fcmToken: fcmToken,
           );
           debugPrint('✅ Enrolled in free course: ${item.title}');
         } catch (e) {

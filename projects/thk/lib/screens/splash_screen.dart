@@ -143,197 +143,533 @@ class _SplashScreenState extends State<SplashScreen>
         ? info.message.trim()
         : "We've improved performance and fixed bugs. Update now for the best experience.";
 
+    // Track expanded state for What's New section
+    bool isExpanded = false;
+
     await showDialog<void>(
       context: context,
       barrierDismissible: !force,
-      builder: (context) {
-        final theme = Theme.of(context);
-        return PopScope(
-          canPop: !force,
-          child: Dialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Header
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          theme.colorScheme.primary,
-                          theme.colorScheme.primary.withOpacity(0.82),
-                        ],
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return PopScope(
+              canPop: !force,
+              child: Dialog(
+                insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                elevation: 0,
+                backgroundColor: Colors.transparent,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF2E7DFF).withOpacity(0.15),
+                        blurRadius: 32,
+                        offset: const Offset(0, 12),
                       ),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
+                        // Modern Gradient Header
                         Container(
-                          width: 46,
-                          height: 46,
+                          width: double.infinity,
+                          padding: const EdgeInsets.fromLTRB(24, 24, 24, 28),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.18),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white.withOpacity(0.25)),
-                          ),
-                          padding: const EdgeInsets.all(6),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: Image.asset(
-                              'Asset/thk.png',
-                              fit: BoxFit.cover,
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                const Color(0xFF2E7DFF),
+                                const Color(0xFF2E7DFF).withOpacity(0.85),
+                              ],
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                titleText,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
+                              // App Icon Container
+                              Container(
+                                width: 60,
+                                height: 60,
+                                decoration: BoxDecoration(
                                   color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
+                                  borderRadius: BorderRadius.circular(14),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                force ? 'This update is required to continue.' : 'New version available',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.90),
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (info.latestVersionName != null && info.latestVersionName!.trim().isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.20),
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(color: Colors.white.withOpacity(0.25)),
-                            ),
-                            child: Text(
-                              'v${info.latestVersionName}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  // Body
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          messageText,
-                          style: TextStyle(
-                            fontSize: 13.8,
-                            height: 1.35,
-                            fontWeight: FontWeight.w500,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.primary.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: theme.colorScheme.primary.withOpacity(0.15),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.system_update_alt_rounded, size: 18, color: theme.colorScheme.primary),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Update now to keep using the app.',
-                                  style: TextStyle(
-                                    fontSize: 12.8,
-                                    height: 1.25,
-                                    fontWeight: FontWeight.w600,
-                                    color: theme.colorScheme.onSurface,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.asset(
+                                    'Asset/appIcon.png',
+                                    width: 60,
+                                    height: 60,
+                                    fit: BoxFit.cover,
                                   ),
                                 ),
                               ),
+                              const SizedBox(height: 16),
+                              // Title
+                              Text(
+                                'Update Available',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              // Subtitle
+                              Text(
+                                force
+                                    ? 'This update is required to continue using the app'
+                                    : 'Stay updated with the latest features and improvements',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w500,
+                                  height: 1.4,
+                                ),
+                              ),
+                              if (info.latestVersionName != null &&
+                                  info.latestVersionName!.trim().isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 7,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: Colors.white.withOpacity(0.25),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'Version ${info.latestVersionName}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        
+                        // Body Content
+                        Container(
+                          color: Colors.white,
+                          padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Always show "What's New" button first (collapsed state)
+                              if (!isExpanded) ...[
+                                // What's New Button - tap to see message
+                                GestureDetector(
+                                  onTap: () {
+                                    isExpanded = true;
+                                    setDialogState(() {});
+                                  },
+                                  child: Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 14,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF2E7DFF).withOpacity(0.08),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: const Color(0xFF2E7DFF).withOpacity(0.2),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 40,
+                                          height: 40,
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF2E7DFF).withOpacity(0.15),
+                                            borderRadius: BorderRadius.circular(10),
+                                          ),
+                                          child: Icon(
+                                            Icons.featured_play_list_outlined,
+                                            color: const Color(0xFF2E7DFF),
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                "What's New",
+                                                style: TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: const Color(0xFF1F2937),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'Tap to see update details',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: const Color(0xFF6B7280),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          color: const Color(0xFF2E7DFF),
+                                          size: 24,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ] else ...[
+                                // Expanded - Show full message
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF9FAFB),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: const Color(0xFFE5E7EB),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.new_releases_outlined,
+                                            color: const Color(0xFF2E7DFF),
+                                            size: 18,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            "What's New",
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w700,
+                                              color: const Color(0xFF1F2937),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      // Features List
+                                      Container(
+                                        constraints: BoxConstraints(maxHeight: 150),
+                                        child: SingleChildScrollView(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: messageText.split('\n').map((line) {
+                                              final trimmedLine = line.trim();
+                                              if (trimmedLine.isEmpty) return const SizedBox(height: 6);
+                                              
+                                              // Check if line starts with bullet or dash
+                                              final isBullet = trimmedLine.startsWith('•') ||
+                                                  trimmedLine.startsWith('-') ||
+                                                  trimmedLine.startsWith('*');
+                                              final displayText = isBullet 
+                                                  ? trimmedLine.substring(1).trim() 
+                                                  : trimmedLine;
+                                              
+                                              return Padding(
+                                                padding: const EdgeInsets.only(bottom: 8),
+                                                child: Row(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Container(
+                                                      margin: const EdgeInsets.only(top: 6),
+                                                      width: 6,
+                                                      height: 6,
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(0xFF2E7DFF),
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 10),
+                                                    Expanded(
+                                                      child: Text(
+                                                        displayText,
+                                                        style: TextStyle(
+                                                          fontSize: 13.5,
+                                                          height: 1.5,
+                                                          fontWeight: FontWeight.w500,
+                                                          color: const Color(0xFF4B5563),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      // Show Less Button
+                                      GestureDetector(
+                                        onTap: () {
+                                          isExpanded = false;
+                                          setDialogState(() {});
+                                        },
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.keyboard_arrow_up_rounded,
+                                              color: const Color(0xFF6B7280),
+                                              size: 18,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              'Show Less',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                                color: const Color(0xFF6B7280),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              
+                              const SizedBox(height: 16),
+
+                              // Info Box
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF2E7DFF).withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: const Color(0xFF2E7DFF).withOpacity(0.15),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 40,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF2E7DFF).withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Icon(
+                                        Icons.info_outline_rounded,
+                                        color: Color(0xFF2E7DFF),
+                                        size: 20,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        force
+                                            ? 'This is a mandatory security update'
+                                            : 'Regular updates keep your app secure and fast',
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF1F2937),
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        
+                        // Action Buttons
+                        Container(
+                          color: Colors.white,
+                          padding: const EdgeInsets.fromLTRB(24, 4, 24, 20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // Primary Button
+                              Container(
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      Color(0xFF2E7DFF),
+                                      Color(0xFF2E5FB0),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(14),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF2E7DFF).withOpacity(0.25),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () => _openStore(info),
+                                    borderRadius: BorderRadius.circular(14),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                        horizontal: 16,
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.cloud_download_outlined,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          const Text(
+                                            'Update Now',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 0.3,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (!force) ...[
+                                const SizedBox(height: 10),
+                                // Secondary Button (Later)
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF6B7280).withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () => Navigator.of(context).pop(),
+                                      borderRadius: BorderRadius.circular(14),
+                                      child: const Padding(
+                                        padding: EdgeInsets.symmetric(
+                                          vertical: 14,
+                                          horizontal: 16,
+                                        ),
+                                        child: Center(
+                                          child: Text(
+                                            'Later',
+                                            style: TextStyle(
+                                              color: Color(0xFF374151),
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w700,
+                                              letterSpacing: 0.3,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
                       ],
                     ),
                   ),
-                  // Actions
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => _openStore(info),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              elevation: 0,
-                              backgroundColor: theme.colorScheme.primary,
-                              foregroundColor: Colors.white,
-                            ),
-                            child: const Text(
-                              'Update Now',
-                              style: TextStyle(fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
   }
 
   Future<void> _openStore(AppVersionInfo info) async {
-    final url = Platform.isIOS
-        ? (info.iosStoreUrl?.isNotEmpty == true
-            ? info.iosStoreUrl
-            : 'https://apps.apple.com/app/thinkcyber/id123456789')
-        : 'https://play.google.com/store/apps/details?id=com.edu.thinkcyber';
-    if (url == null || url.isEmpty) return;
-
+    final String url;
+    
+    if (Platform.isIOS) {
+      url = (info.iosStoreUrl?.isNotEmpty == true)
+          ? info.iosStoreUrl!
+          : 'https://apps.apple.com/app/thinkcyber/id123456789';
+    } else {
+      url = (info.androidStoreUrl?.isNotEmpty == true)
+          ? info.androidStoreUrl!
+          : 'https://play.google.com/store/apps/details?id=com.edu.thinkcyber';
+    }
+    
+    debugPrint('🔗 Opening store URL: $url');
+    debugPrint('📦 Android URL from API: ${info.androidStoreUrl}');
+    debugPrint('🍎 iOS URL from API: ${info.iosStoreUrl}');
+    
     final uri = Uri.tryParse(url);
-    if (uri == null) return;
+    if (uri == null) {
+      debugPrint('❌ Invalid URL: $url');
+      return;
+    }
 
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    try {
+      final canLaunch = await canLaunchUrl(uri);
+      debugPrint('📱 Can launch URL: $canLaunch');
+      
+      if (canLaunch) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        debugPrint('✅ URL launched successfully');
+      } else {
+        // Fallback: try with platform default
+        await launchUrl(uri, mode: LaunchMode.platformDefault);
+      }
+    } catch (e) {
+      debugPrint('❌ Error launching URL: $e');
+      // Show error to user if context is available
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not open store. Please update manually.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -363,8 +699,8 @@ class _SplashScreenState extends State<SplashScreen>
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              Color(0xFF6366F1), // Indigo
-              Color(0xFF4F46E5), // Indigo darker
+              Color(0xFF3B83FF), // Indigo
+              Color(0xFF2563EB), // Indigo darker
               Color(0xFF2563EB), // Blue
             ],
             stops: [0.0, 0.5, 1.0],
@@ -423,13 +759,13 @@ class _SplashScreenState extends State<SplashScreen>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Logo with contrasting background
+                      // App Icon Logo
                       Container(
                         width: 160,
                         height: 160,
                         decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white.withOpacity(0.95),
+                          borderRadius: BorderRadius.circular(24),
+                          color: Colors.white,
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withOpacity(0.2),
@@ -438,13 +774,10 @@ class _SplashScreenState extends State<SplashScreen>
                             ),
                           ],
                         ),
-                        child: Center(
-                          child: Image.asset(
-                            'Asset/thk.png',
-                            width: 120,
-                            height: 120,
-                            fit: BoxFit.contain,
-                          ),
+                        padding: const EdgeInsets.all(16),
+                        child: Image.asset(
+                          'Asset/appIcon.png',
+                          fit: BoxFit.contain,
                         ),
                       ),
                       const SizedBox(height: 40),
