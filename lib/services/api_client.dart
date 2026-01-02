@@ -113,7 +113,10 @@ class ThinkCyberApi {
     num parsePrice(dynamic value) {
       if (value is num) return value;
       if (value is String) {
-        final parsed = double.tryParse(value.trim());
+        final cleaned = value
+            .replaceAll(RegExp(r'[^0-9.,-]'), '')
+            .replaceAll(',', '');
+        final parsed = double.tryParse(cleaned.trim());
         return parsed ?? 0;
       }
       return 0;
@@ -814,7 +817,11 @@ class CourseTopic {
           return value;
         }
         if (value is String) {
-          final parsed = num.tryParse(value);
+          // Normalize common currency formats (₹1,299.00, 1,299, 1299)
+          final cleaned = value
+              .replaceAll(RegExp(r'[^0-9.,-]'), '')
+              .replaceAll(',', '');
+          final parsed = num.tryParse(cleaned);
           if (parsed != null) {
             return parsed;
           }
@@ -1151,12 +1158,20 @@ class TopicVideo {
     required this.title,
     required this.videoUrl,
     required this.thumbnailUrl,
+    this.duration,
+    this.durationSeconds,
+    this.isPreview = false,
+    this.description = '',
   });
 
   final int id;
   final String title;
   final String videoUrl;
   final String? thumbnailUrl;
+  final String? duration;
+  final int? durationSeconds;
+  final bool isPreview;
+  final String description;
 
   factory TopicVideo.fromJson(Map<String, dynamic> json) {
     String? readString(List<String> keys) {
@@ -1169,11 +1184,41 @@ class TopicVideo {
       return null;
     }
 
+    int? readInt(List<String> keys) {
+      for (final key in keys) {
+        final value = json[key];
+        if (value is int) return value;
+        if (value is String) {
+          final parsed = int.tryParse(value);
+          if (parsed != null) return parsed;
+        }
+      }
+      return null;
+    }
+
+    bool readBool(List<String> keys) {
+      for (final key in keys) {
+        final value = json[key];
+        if (value is bool) return value;
+        if (value is String) {
+          final normalized = value.toLowerCase();
+          if (normalized == 'true' || normalized == '1') return true;
+          if (normalized == 'false' || normalized == '0') return false;
+        }
+        if (value is num) return value != 0;
+      }
+      return false;
+    }
+
     return TopicVideo(
       id: json['id'] as int? ?? 0,
       title: readString(['title']) ?? '',
       videoUrl: readString(['videoUrl', 'video_url']) ?? '',
       thumbnailUrl: readString(['thumbnailUrl', 'thumbnail_url']),
+      duration: readString(['duration', 'duration_label']),
+      durationSeconds: readInt(['durationSeconds', 'duration_seconds']),
+      isPreview: readBool(['isPreview', 'is_preview']),
+      description: readString(['description']) ?? '',
     );
   }
 }
@@ -1320,6 +1365,12 @@ class Contact {
   final Map<String, dynamic> socialLinks;
 
   factory Contact.fromJson(Map<String, dynamic> json) {
+    final parsedSupportEmail = (json['supportEmail'] as String? ?? '').trim();
+    final supportEmail = parsedSupportEmail.isEmpty ||
+            parsedSupportEmail.toLowerCase() == 'support@thinkcyber.in'
+        ? 'support@thinkcuber.info'
+        : parsedSupportEmail;
+
     return Contact(
       id: json['id'] as String? ?? '',
       email: json['email'] as String? ?? '',
@@ -1327,7 +1378,7 @@ class Contact {
       address: json['address'] as String?,
       hours: json['hours'] as String?,
       description: json['description'] as String?,
-      supportEmail: json['supportEmail'] as String? ?? '',
+      supportEmail: supportEmail,
       salesEmail: json['salesEmail'] as String? ?? '',
       socialLinks: json['socialLinks'] as Map<String, dynamic>? ?? {},
     );

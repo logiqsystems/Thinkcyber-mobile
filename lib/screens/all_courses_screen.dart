@@ -8,7 +8,7 @@ import '../widgets/translated_text.dart';
 import 'topic_detail_screen.dart';
 import 'bundle_topics_detail_screen.dart';
 
-const _pageBackground = Color(0xFFF5F7FA);
+const _pageBackground = Color(0xFFF8FAFC);
 const _cardBackground = Colors.white;
 const _textColor = Color(0xFF1F2937);
 const _mutedColor = Color(0xFF6B7280);
@@ -19,50 +19,59 @@ String _truncateDescription(String description, int maxLength) {
   if (description.length <= maxLength) {
     return description;
   }
-  
-  // Find the last complete word within the limit
+
   String truncated = description.substring(0, maxLength);
   int lastSpace = truncated.lastIndexOf(' ');
-  
+
   if (lastSpace > 0) {
     truncated = truncated.substring(0, lastSpace);
   }
-  
+
   return '$truncated...';
 }
 
-/// Public controller for programmatically switching tabs
 class AllCoursesController {
   void Function(int)? _switchToTab;
-  
+
   void switchToTab(int index) {
     _switchToTab?.call(index);
   }
-  
+
   void _attach(void Function(int) callback) {
     _switchToTab = callback;
   }
-  
+
   void _detach() {
     _switchToTab = null;
   }
 }
 
 class AllCoursesScreen extends StatefulWidget {
-  const AllCoursesScreen({super.key, this.initialTabIndex = 0, this.controller});
+  const AllCoursesScreen({
+    super.key,
+    this.initialTabIndex = 0,
+    this.controller,
+    this.initialCategoryName,
+  });
 
   final int initialTabIndex;
   final AllCoursesController? controller;
+  final String? initialCategoryName;
 
   @override
   State<AllCoursesScreen> createState() => _AllCoursesScreenState();
 }
 
-class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerProviderStateMixin {
+class _AllCoursesScreenState extends State<AllCoursesScreen>
+    with TickerProviderStateMixin {
   final ThinkCyberApi _api = ThinkCyberApi();
   final WishlistStore _wishlist = WishlistStore.instance;
   late final VoidCallback _wishlistListener;
   late TabController _tabController;
+  late AnimationController _fadeController;
+  late Animation<double> _fadeAnimation;
+  String? _categoryFilter;
+
   List<CourseTopic> _courses = const [];
   List<CourseTopic> _freeCourses = const [];
   List<CourseTopic> _paidCourses = const [];
@@ -78,10 +87,19 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: 3, 
+      length: 3,
       vsync: this,
       initialIndex: widget.initialTabIndex,
     );
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeOut,
+    );
+
     _tabController.addListener(_onTabChanged);
     _loadCourses();
     _loadEnrollments();
@@ -90,25 +108,28 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     };
     _wishlist.addListener(_wishlistListener);
     _wishlist.hydrate();
-    
-    // Attach controller if provided
+
     widget.controller?._attach(_switchToTab);
+
+    _categoryFilter = widget.initialCategoryName;
   }
 
-  /// Public method to switch to a specific tab
   void switchToTab(int index) {
     _switchToTab(index);
   }
-  
-  /// Internal method to switch tabs
+
   void _switchToTab(int index) {
     if (index >= 0 && index < 3 && mounted) {
       _tabController.animateTo(index);
     }
   }
 
+  List<CourseTopic> _applyCategoryFilter(List<CourseTopic> list) {
+    if (_categoryFilter == null || _categoryFilter!.isEmpty) return list;
+    return list.where((c) => c.categoryName == _categoryFilter).toList();
+  }
+
   void _onTabChanged() {
-    // When user switches to Enrollments tab (index 2), refresh the enrollments
     if (_tabController.index == 2) {
       debugPrint('🔄 Enrollments tab selected, refreshing enrollments...');
       _loadEnrollments(showLoader: false);
@@ -121,8 +142,19 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     _api.dispose();
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _fadeController.dispose();
     _wishlist.removeListener(_wishlistListener);
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant AllCoursesScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialCategoryName != oldWidget.initialCategoryName) {
+      setState(() {
+        _categoryFilter = widget.initialCategoryName;
+      });
+    }
   }
 
   Future<void> _loadCourses({bool showLoader = true}) async {
@@ -137,14 +169,54 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
       final prefs = await SharedPreferences.getInstance();
       final storedUserId = prefs.getInt('thinkcyber_user_id');
 
-      final response = await _api.fetchTopics(userId: storedUserId);
+      final topicsResponse = await _api.fetchTopics(userId: storedUserId);
+      List<CourseTopic> courses = topicsResponse.topics;
+
+      final freeBundleCategoryIds = <int>{};
+      if (storedUserId != null && storedUserId > 0) {
+        try {
+          final userBundles = await _api.fetchUserBundles(userId: storedUserId);
+          freeBundleCategoryIds.addAll(
+            userBundles
+                .where((b) => b.planType.toUpperCase() == 'FREE')
+                .map((b) => b.categoryId),
+          );
+
+          if (freeBundleCategoryIds.isNotEmpty) {
+            courses = courses
+                .map((course) => freeBundleCategoryIds.contains(course.categoryId)
+                    ? course.copyWith(isFree: true, price: 0)
+                    : course)
+                .toList();
+          }
+        } catch (e) {
+          debugPrint('Error loading user bundles for free topics: $e');
+        }
+      }
+
+      // Debug: understand why topics land in the Free tab
+      int byFlag = 0, byZeroPrice = 0, byBundle = 0, paidButMarkedFree = 0;
+      for (final course in courses) {
+        final bool bundleFree = freeBundleCategoryIds.contains(course.categoryId);
+        final bool zeroPrice = course.price == 0;
+        if (course.isFree) byFlag++;
+        if (zeroPrice) byZeroPrice++;
+        if (bundleFree) byBundle++;
+        if (course.isFree && course.price > 0) {
+          paidButMarkedFree++;
+          debugPrint('⚠️  Paid price but flagged free: ${course.title} (price: ${course.price})');
+        }
+      }
+      debugPrint('Free classification counts -> isFree flag: $byFlag, zero price: $byZeroPrice, free bundles: $byBundle, paid-but-flagged-free: $paidButMarkedFree');
+
       if (!mounted) return;
       setState(() {
-        _courses = response.topics;
-        _freeCourses = _courses.where((c) => c.isFree || c.price == 0).toList();
-        _paidCourses = _courses.where((c) => !(c.isFree || c.price == 0)).toList();
+        _courses = courses;
+        _freeCourses = courses.where((c) => c.isFree || c.price == 0).toList();
+        _paidCourses = courses.where((c) => !(c.isFree || c.price == 0)).toList();
         _loading = false;
       });
+      _fadeController.forward();
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -207,18 +279,18 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
       setState(() {
         _userId = storedUserId;
         _enrollmentsError =
-            'Unable to load enrollments right now. Please try again.';
+        'Unable to load enrollments right now. Please try again.';
         _enrollmentsLoading = false;
       });
     }
   }
 
   Widget _buildGrid(
-    List<CourseTopic> courses, {
-    Future<void> Function()? onRefresh,
-    Widget? emptyState,
-    bool hidePriceBadge = false,
-  }) {
+      List<CourseTopic> courses, {
+        Future<void> Function()? onRefresh,
+        Widget? emptyState,
+        bool hidePriceBadge = false,
+      }) {
     if (courses.isEmpty) {
       return emptyState ?? const _EmptyState();
     }
@@ -234,23 +306,50 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
           crossAxisCount: 2,
           crossAxisSpacing: 14,
           mainAxisSpacing: 14,
-          childAspectRatio: 0.78,
+          childAspectRatio: 0.75,
         ),
         itemBuilder: (context, index) {
           final course = courses[index];
-          return _CourseCard(
+          return _EnhancedCourseCard(
             course: course,
             isWishlisted: _wishlist.contains(course.id),
             hidePriceBadge: hidePriceBadge,
+            index: index,
             onToggleWishlist: () async {
               final messenger = ScaffoldMessenger.of(context);
               final added = await _wishlist.toggleCourse(summary: course);
               if (!mounted) return;
               messenger.showSnackBar(
                 SnackBar(
-                  content: TranslatedText(
-                    added ? 'Added to wishlist' : 'Removed from wishlist',
+                  content: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          added ? Icons.favorite : Icons.favorite_border,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TranslatedText(
+                          added ? 'Added to wishlist' : 'Removed from wishlist',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
                   ),
+                  backgroundColor: const Color(0xFF1F2937),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  margin: const EdgeInsets.all(16),
                 ),
               );
             },
@@ -263,7 +362,6 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
                   ),
                 ),
               );
-              // Refresh enrollments when returning from detail screen
               if (mounted && _tabController.index == 2) {
                 debugPrint('🔄 Returning to Enrollments tab, refreshing...');
                 _loadEnrollments(showLoader: false);
@@ -280,14 +378,55 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     if (_loading) {
       return Scaffold(
         backgroundColor: _pageBackground,
-        appBar: AppBar(
-          title: const TranslatedText('All Topics'),
-          backgroundColor: _pageBackground,
-          foregroundColor: _textColor,
-          elevation: 0,
-        ),
-        body: const Center(
-          child: CircularProgressIndicator(color: _accentColor),
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF6366F1),
+                Color(0xFF8B5CF6),
+                Color(0xFFF8FAFC),
+              ],
+              stops: [0.0, 0.3, 0.6],
+            ),
+          ),
+          child: SafeArea(
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(28),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF6366F1).withOpacity(0.3),
+                          blurRadius: 30,
+                          spreadRadius: 10,
+                        ),
+                      ],
+                    ),
+                    child: const CircularProgressIndicator(
+                      color: Color(0xFF6366F1),
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Loading Courses...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       );
     }
@@ -295,12 +434,7 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     if (_error != null) {
       return Scaffold(
         backgroundColor: _pageBackground,
-        appBar: AppBar(
-          title: const TranslatedText('All Topics'),
-          backgroundColor: _pageBackground,
-          foregroundColor: _textColor,
-          elevation: 0,
-        ),
+        appBar: _buildEnhancedAppBar(),
         body: _CoursesError(message: _error!, onRetry: _loadCourses),
       );
     }
@@ -308,79 +442,197 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     if (_courses.isEmpty) {
       return Scaffold(
         backgroundColor: _pageBackground,
-        appBar: AppBar(
-          title: const TranslatedText('All Topics'),
-          backgroundColor: _pageBackground,
-          foregroundColor: _textColor,
-          elevation: 0,
-        ),
+        appBar: _buildEnhancedAppBar(),
         body: const _EmptyState(),
       );
     }
 
+    final filteredFree = _applyCategoryFilter(_freeCourses);
+    final filteredPaid = _applyCategoryFilter(_paidCourses);
+    final hasCategoryFilter = _categoryFilter != null && _categoryFilter!.isNotEmpty;
+
     return Scaffold(
       backgroundColor: _pageBackground,
-      appBar: AppBar(
-        title: const TranslatedText('All Topics'),
-        backgroundColor: _pageBackground,
-        foregroundColor: _textColor,
-        surfaceTintColor: Colors.transparent, // removes default Material3 tint line
-
-        elevation: 0,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(52),
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(25),
+      appBar: _buildEnhancedAppBar(),
+      body: FadeTransition(
+        opacity: _fadeAnimation,
+        child: Column(
+          children: [
+            if (hasCategoryFilter)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _accentColor.withOpacity(0.15)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.03),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _accentColor.withOpacity(0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.filter_alt_rounded, color: _accentColor, size: 16),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TranslatedText(
+                          'Showing topics in ${_categoryFilter!}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _textColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _categoryFilter = null;
+                          });
+                        },
+                        icon: const Icon(Icons.close_rounded, size: 16),
+                        label: const TranslatedText('Clear', style: TextStyle(fontWeight: FontWeight.w700)),
+                        style: TextButton.styleFrom(
+                          foregroundColor: _accentColor,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildGrid(filteredFree),
+                  _buildGrid(filteredPaid),
+                  _buildEnrollmentsTab(),
+                ],
+              ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
 
+  PreferredSizeWidget _buildEnhancedAppBar() {
+    final freeCount = _applyCategoryFilter(_freeCourses).length;
+    final paidCount = _applyCategoryFilter(_paidCourses).length;
+    return AppBar(
+      title: const TranslatedText(
+        'All Topics',
+        style: TextStyle(
+          fontWeight: FontWeight.w800,
+          fontSize: 24,
+          letterSpacing: -0.5,
+        ),
+      ),
+      backgroundColor: _pageBackground,
+      foregroundColor: _textColor,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(68),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Container(
+            height: 52,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.all(4),
             child: TabBar(
               controller: _tabController,
               indicatorSize: TabBarIndicatorSize.tab,
               labelColor: Colors.white,
               unselectedLabelColor: _mutedColor,
-              isScrollable: false,
+              dividerColor: Colors.transparent,
               indicator: BoxDecoration(
-                color: _accentColor,
-                borderRadius: BorderRadius.circular(25),
-                boxShadow: const [
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF2E7DFF), Color(0xFF1E5FDD)],
+                ),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
                   BoxShadow(
-                    color: Color(0x22000000),
-                    blurRadius: 8,
-                    offset: Offset(0, 3),
+                    color: _accentColor.withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
               labelStyle: const TextStyle(
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
                 fontSize: 13,
+                letterSpacing: 0.2,
               ),
               unselectedLabelStyle: const TextStyle(
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w600,
                 fontSize: 12,
               ),
-              labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+              labelPadding: EdgeInsets.zero,
               tabs: [
                 Tab(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: TranslatedText('Free (${_freeCourses.length})'),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.card_giftcard, size: 16),
+                      const SizedBox(width: 6),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TranslatedText('Free ($freeCount)'),
+                      ),
+                    ],
                   ),
                 ),
                 Tab(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: TranslatedText('Paid (${_paidCourses.length})'),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.diamond_outlined, size: 16),
+                      const SizedBox(width: 6),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TranslatedText('Paid ($paidCount)'),
+                      ),
+                    ],
                   ),
                 ),
                 Tab(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: TranslatedText(_userId == null
-                        ? 'Enrollments'
-                        : 'Enrollments (${_enrolledCourses.length})'),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.school_outlined, size: 16),
+                      const SizedBox(width: 6),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TranslatedText(_userId == null
+                            ? 'My Courses'
+                            : 'My (${_enrolledCourses.length})'),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -388,21 +640,32 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
           ),
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildGrid(_freeCourses),
-          _buildGrid(_paidCourses),
-          _buildEnrollmentsTab(),
-        ],
-      ),
     );
   }
 
   Widget _buildEnrollmentsTab() {
     if (_enrollmentsLoading) {
-      return const Center(
-        child: CircularProgressIndicator(color: _accentColor),
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: _accentColor.withOpacity(0.2),
+                    blurRadius: 20,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child: const CircularProgressIndicator(color: _accentColor),
+            ),
+          ],
+        ),
       );
     }
 
@@ -422,7 +685,6 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
       return const _EnrollmentsEmptyState();
     }
 
-    // Debug: Print all enrollments in detail
     debugPrint('=== ALL ENROLLMENTS (${_enrolledCourses.length}) ===');
     for (int i = 0; i < _enrolledCourses.length; i++) {
       final e = _enrolledCourses[i];
@@ -434,33 +696,28 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
       debugPrint('[$i] ${b.categoryName} - planType: ${b.planType} - price: ${b.bundlePrice}');
     }
 
-    // Separate bundles by plan type
-    final paidBundleEnrollments = _userBundles.where((b) => 
-      b.planType == 'BUNDLE'
+    final paidBundleEnrollments = _userBundles.where((b) =>
+    b.planType == 'BUNDLE'
     ).toList();
-    
-    final flexibleBundleEnrollments = _userBundles.where((b) => 
-      b.planType == 'FLEXIBLE'
+
+    final flexibleBundleEnrollments = _userBundles.where((b) =>
+    b.planType == 'FLEXIBLE'
     ).toList();
-    
-    // Free bundles: from user_bundles API with FREE plan_type
-    var freeBundleEnrollments = _userBundles.where((b) => 
-      b.planType == 'FREE'
+
+    var freeBundleEnrollments = _userBundles.where((b) =>
+    b.planType == 'FREE'
     ).toList();
-    
-    // Also add free individual enrollments with categoryName as virtual free bundles
+
     final freeEnrollmentsWithCategory = _enrolledCourses.where((e) =>
-      e.price == 0 && e.categoryName != null && e.categoryName!.isNotEmpty
+    e.price == 0 && e.categoryName != null && e.categoryName!.isNotEmpty
     ).toList();
-    
-    // Convert free enrollments with category to virtual UserBundles
+
     final Map<String, List<CourseTopic>> freeByCategory = {};
     for (final e in freeEnrollmentsWithCategory) {
       final cat = e.categoryName ?? 'General';
       freeByCategory.putIfAbsent(cat, () => []).add(e);
     }
-    
-    // Create virtual bundles from free course groups
+
     for (final entry in freeByCategory.entries) {
       final firstTopic = entry.value.first;
       final virtualFreeBundle = UserBundle(
@@ -476,13 +733,12 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
         accessibleTopicsCount: entry.value.length,
         description: 'Free Plan',
       );
-      
-      // Only add if not already in bundles from API
+
       if (!freeBundleEnrollments.any((b) => b.categoryId == firstTopic.categoryId)) {
         freeBundleEnrollments = [...freeBundleEnrollments, virtualFreeBundle];
       }
     }
-    
+
     debugPrint('=== FILTERED BUNDLES ===');
     debugPrint('Paid Bundles: ${paidBundleEnrollments.length}');
     debugPrint('Flexible Bundles: ${flexibleBundleEnrollments.length}');
@@ -490,218 +746,107 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     for (var fb in freeBundleEnrollments) {
       debugPrint('  ✅ ${fb.categoryName} (${fb.accessibleTopicsCount} topics)');
     }
-    
-    final individualEnrollments = _enrolledCourses.where((c) => 
-      c.categoryName == null || c.categoryName!.isEmpty
+
+    final individualEnrollments = _enrolledCourses.where((c) =>
+    c.categoryName == null || c.categoryName!.isEmpty
     ).toList();
 
     return RefreshIndicator(
       onRefresh: () => _loadEnrollments(showLoader: false),
       color: _accentColor,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Paid Bundle Plans Section
-          if (paidBundleEnrollments.isNotEmpty) ...[
-            _buildSectionHeader(
-              icon: Icons.card_giftcard_rounded,
-              title: 'Bundle Plans',
-              count: paidBundleEnrollments.length,
-              color: const Color(0xFFF59E0B),
-            ),
-            const SizedBox(height: 16),
-            ..._buildBundleCardsFromUserBundles(paidBundleEnrollments),
-            const SizedBox(height: 24),
-          ],
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate(
+                [
+                  // const _PremiumEnrollmentsTopBar(),
 
-          // Flexible Bundle Plans Section
-          if (flexibleBundleEnrollments.isNotEmpty) ...[
-            _buildSectionHeader(
-              icon: Icons.tune_rounded,
-              title: 'Flexible Plans',
-              count: flexibleBundleEnrollments.length,
-              color: const Color(0xFF6366F1),
-            ),
-            const SizedBox(height: 16),
-            ..._buildFlexibleBundleCards(flexibleBundleEnrollments),
-            const SizedBox(height: 24),
-          ],
-
-          // Free Bundle Plans Section
-          if (freeBundleEnrollments.isNotEmpty) ...[
-            _buildSectionHeader(
-              icon: Icons.card_giftcard_rounded,
-              title: 'Free Plans',
-              count: freeBundleEnrollments.length,
-              color: const Color(0xFF10B981),
-            ),
-            const SizedBox(height: 16),
-            ..._buildFreeBundleCardsFromUserBundles(freeBundleEnrollments),
-            const SizedBox(height: 24),
-          ],
-          
-          // Individual Topics Section
-          if (individualEnrollments.isNotEmpty) ...[
-            _buildSectionHeader(
-              icon: Icons.article_outlined,
-              title: 'Individual Topics',
-              count: individualEnrollments.length,
-              color: const Color(0xFF6366F1),
-            ),
-            const SizedBox(height: 16),
-            ..._buildIndividualCards(individualEnrollments),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEnrollmentHeader() {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF6366F1),
-            Color(0xFF4F46E5),
-            Color(0xFF2563EB),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF6366F1).withOpacity(0.3),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.school_rounded,
-                color: Colors.white,
-                size: 28,
-              ),
-              SizedBox(width: 12),
-              TranslatedText(
-                'My Enrollments',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          TranslatedText(
-            'You have ${_getBundleCount(_enrolledCourses)} bundle and ${_getIndividualCount(_enrolledCourses)} individual topics enrolled',
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.white,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.3),
-                width: 1,
-              ),
-            ),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.info_outline_rounded,
-                  color: Colors.white,
-                  size: 18,
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: TranslatedText(
-                    'Subscription Validity: Each course subscription is valid for one year from the date of enrollment.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w500,
+                  if (paidBundleEnrollments.isNotEmpty) ...[
+                    // const SizedBox(height: 14),
+                    // _PremiumSectionHeader(
+                    //   title: 'Bundle Plans',
+                    //   subtitle: 'Full access by category',
+                    //   count: paidBundleEnrollments.length,
+                    //   icon: Icons.workspace_premium_rounded,
+                    //   tone: _SectionTone.amber,
+                    // ),
+                    const SizedBox(height: 10),
+                    _PremiumListContainer(
+                      tone: _SectionTone.amber,
+                      heading: 'Bundle Plans',
+                      subheading: 'Everything in this category',
+                      icon: Icons.workspace_premium_rounded,
+                      children: _buildBundleCardsFromUserBundles(paidBundleEnrollments),
                     ),
-                  ),
-                ),
-              ],
+                  ],
+
+                  if (flexibleBundleEnrollments.isNotEmpty) ...[
+                    const SizedBox(height: 18),
+                    _PremiumSectionHeader(
+                      title: 'Flexible Plans',
+                      subtitle: 'Pick what you want to learn',
+                      count: flexibleBundleEnrollments.length,
+                      icon: Icons.tune_rounded,
+                      tone: _SectionTone.indigo,
+                    ),
+                    const SizedBox(height: 10),
+                    ..._buildFlexibleBundleCards(flexibleBundleEnrollments),
+                  ],
+
+                  if (freeBundleEnrollments.isNotEmpty) ...[
+                    // const SizedBox(height: 18),
+                    // _PremiumSectionHeader(
+                    //   title: 'Free Plans',
+                    //   subtitle: 'Starter access included',
+                    //   count: freeBundleEnrollments.length,
+                    //   icon: Icons.lock_open_rounded,
+                    //   tone: _SectionTone.green,
+                    // ),
+                    const SizedBox(height: 10),
+                    _PremiumListContainer(
+                      tone: _SectionTone.green,
+                      heading: 'Free Plans',
+                      subheading: 'Included starter access',
+                      icon: Icons.lock_open_rounded,
+                      children: _buildFreeBundleCardsFromUserBundles(freeBundleEnrollments),
+                    ),
+                  ],
+
+                  if (individualEnrollments.isNotEmpty) ...[
+                    const SizedBox(height: 18),
+                    _PremiumSectionHeader(
+                      title: 'Individual Topics',
+                      subtitle: 'Standalone enrollments',
+                      count: individualEnrollments.length,
+                      icon: Icons.article_outlined,
+                      tone: _SectionTone.violet,
+                    ),
+                    const SizedBox(height: 10),
+                    ..._buildIndividualCards(individualEnrollments),
+                  ],
+
+                  const SizedBox(height: 40),
+                ],
+              ),
             ),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildSectionHeader({
-    required IconData icon,
-    required String title,
-    required int count,
-    required Color color,
-  }) {
-    return Row(
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, color: color, size: 22),
-        ),
-        const SizedBox(width: 12),
-        TranslatedText(
-          title,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: _textColor,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            '$count',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
-          ),
-        ),
-      ],
     );
   }
 
   int _getBundleCount(List<CourseTopic> courses) {
-    // Bundle: Only paid courses with category names
-    // Must check actual _courses list since enrollment API doesn't return price
     final bundleCourses = courses.where((enrollment) {
       final actualCourse = _courses.firstWhere(
-        (c) => c.id == enrollment.id,
+            (c) => c.id == enrollment.id,
         orElse: () => enrollment,
       );
       return actualCourse.price > 0 && enrollment.categoryName != null && enrollment.categoryName!.isNotEmpty;
     }).toList();
-    
+
     final categories = bundleCourses
         .map((c) => c.categoryName)
         .toSet()
@@ -710,23 +855,20 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
   }
 
   int _getIndividualCount(List<CourseTopic> courses) {
-    // Individual: Courses without category names
     return courses
         .where((c) => c.categoryName == null || c.categoryName!.isEmpty)
         .length;
   }
 
   int _getFreeBundleCount(List<CourseTopic> courses) {
-    // Free Bundle: Count unique categories for free bundle enrollments
-    // Must check actual _courses list since enrollment API doesn't return price
     final freeBundleCourses = courses.where((enrollment) {
       final actualCourse = _courses.firstWhere(
-        (c) => c.id == enrollment.id,
+            (c) => c.id == enrollment.id,
         orElse: () => enrollment,
       );
       return actualCourse.price == 0 && enrollment.categoryName != null && enrollment.categoryName!.isNotEmpty;
     }).toList();
-    
+
     final categories = freeBundleCourses
         .map((c) => c.categoryName)
         .toSet()
@@ -734,10 +876,9 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     return categories;
   }
 
-  // Helper: Resolve accurate category name using loaded courses when enrollment uses generic name
   String _resolveCategoryName(int categoryId, String? fallbackName) {
     final match = _courses.firstWhere(
-      (c) => c.categoryId == categoryId,
+          (c) => c.categoryId == categoryId,
       orElse: () => CourseTopic(
         id: -1,
         title: '',
@@ -758,772 +899,397 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
     return match.categoryName;
   }
 
-  // Helper: Get total topics count for a category using loaded courses
   int _getTopicsCountForCategoryId(int categoryId) {
     return _courses.where((c) => c.categoryId == categoryId).length;
   }
 
-  List<Widget> _buildBundleCards(List<CourseTopic> courses) {
-    // Group enrollments by category name
-    final Map<String, List<CourseTopic>> groupedByCategory = {};
-    for (final course in courses) {
-      final category = course.categoryName ?? 'Other';
-      groupedByCategory.putIfAbsent(category, () => []).add(course);
-    }
-
-    final List<Widget> cards = [];
-    groupedByCategory.forEach((categoryNameKey, topics) {
-      final categoryId = topics.first.categoryId;
-      final categoryName = _resolveCategoryName(categoryId, topics.first.categoryName);
-      final topicsCount = _getTopicsCountForCategoryId(categoryId);
-      
-      // Get actual price from _courses list (enrollment API returns 0 for all)
-      final actualCourse = _courses.firstWhere(
-        (c) => c.id == topics.first.id,
-        orElse: () => topics.first,
-      );
-      final bundlePrice = actualCourse.price > 0 ? actualCourse.price : 3500.0;
-
-      cards.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFFFEF3C7),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: const Color(0xFFF59E0B),
-                width: 1.5,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFF59E0B).withOpacity(0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Center(
-                          child: Icon(
-                            Icons.card_giftcard_rounded,
-                            color: Color(0xFFF59E0B),
-                            size: 22,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            TranslatedText(
-                              categoryName,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF1F2937),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 3),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF59E0B),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const TranslatedText(
-                                'BUNDLE',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // Body
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.only(
-                      bottomLeft: Radius.circular(12),
-                      bottomRight: Radius.circular(12),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              const TranslatedText(
-                                'Topics:',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Color(0xFF9CA3AF),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                '$topicsCount',
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF1F2937),
-                                ),
-                              ),
-                            ],
-                          ),
-                          Row(
-                            children: [
-                              const TranslatedText(
-                                'Price:',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Color(0xFF9CA3AF),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                '₹${bundlePrice.toStringAsFixed(0)}',
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFFDC2626),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      const Row(
-                        children: [
-                          Icon(
-                            Icons.check_circle_rounded,
-                            color: Color(0xFF10B981),
-                            size: 14,
-                          ),
-                          SizedBox(width: 6),
-                          TranslatedText(
-                            'Future topics included',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF10B981),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFF59E0B),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            elevation: 0,
-                          ),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => BundleTopicsDetailScreen(
-                                  categoryId: categoryId,
-                                  categoryName: categoryName,
-                                  userId: _userId ?? 0,
-                                ),
-                              ),
-                            );
-                          },
-                          child: const TranslatedText(
-                            'View Topics',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    });
-    return cards;
-  }
-
-  List<Widget> _buildFreeBundleCards(List<CourseTopic> courses) {
-    // Group enrollments by category name
-    final Map<String, List<CourseTopic>> groupedByCategory = {};
-    for (final course in courses) {
-      final category = course.categoryName ?? 'Other';
-      groupedByCategory.putIfAbsent(category, () => []).add(course);
-    }
-
-    final List<Widget> cards = [];
-    groupedByCategory.forEach((categoryNameKey, topics) {
-      final categoryId = topics.first.categoryId;
-      final categoryName = _resolveCategoryName(categoryId, topics.first.categoryName);
-      final topicsCount = _getTopicsCountForCategoryId(categoryId);
-
-      cards.add(
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFFF0FDF4),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: const Color(0xFF10B981),
-                width: 1.5,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF10B981).withOpacity(0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Center(
-                          child: Icon(
-                            Icons.card_giftcard_rounded,
-                            color: Color(0xFF10B981),
-                            size: 22,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            TranslatedText(
-                              categoryName,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF1F2937),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 3),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF10B981),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const TranslatedText(
-                                'FREE',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // Body
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.only(
-                      bottomLeft: Radius.circular(12),
-                      bottomRight: Radius.circular(12),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          const TranslatedText(
-                            'Topics:',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF9CA3AF),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '$topicsCount',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF1F2937),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      const Row(
-                        children: [
-                          Icon(
-                            Icons.check_circle_rounded,
-                            color: Color(0xFF10B981),
-                            size: 14,
-                          ),
-                          SizedBox(width: 6),
-                          TranslatedText(
-                            'Future topics included',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF10B981),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF10B981),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            elevation: 0,
-                          ),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => BundleTopicsDetailScreen(
-                                  categoryId: categoryId,
-                                  categoryName: categoryName,
-                                  userId: _userId ?? 0,
-                                ),
-                              ),
-                            );
-                          },
-                          child: const TranslatedText(
-                            'View Topics',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    });
-    return cards;
-  }
-
-  // Build cards from UserBundle data for BUNDLE plan type
   List<Widget> _buildBundleCardsFromUserBundles(List<UserBundle> bundles) {
-    return bundles.map((bundle) {
-      return _buildBundleCard(bundle, const Color(0xFFF59E0B), 'BUNDLE');
+    return bundles.asMap().entries.map((entry) {
+      final index = entry.key;
+      final bundle = entry.value;
+      return TweenAnimationBuilder<double>(
+        duration: Duration(milliseconds: 400 + (index * 100)),
+        tween: Tween(begin: 0.0, end: 1.0),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, child) {
+          return Transform.translate(
+            offset: Offset(0, 20 * (1 - value)),
+            child: Opacity(
+              opacity: value,
+              child: child,
+            ),
+          );
+        },
+        child: _buildBundleCard(bundle, const [Color(0xFFF59E0B), Color(0xFFD97706)], 'BUNDLE'),
+      );
     }).toList();
   }
 
-  // Build cards from UserBundle data for FLEXIBLE plan type
   List<Widget> _buildFlexibleBundleCards(List<UserBundle> bundles) {
-    return bundles.map((bundle) {
-      return _buildBundleCard(bundle, const Color(0xFF6366F1), 'FLEXIBLE');
+    return bundles.asMap().entries.map((entry) {
+      final index = entry.key;
+      final bundle = entry.value;
+      return TweenAnimationBuilder<double>(
+        duration: Duration(milliseconds: 400 + (index * 100)),
+        tween: Tween(begin: 0.0, end: 1.0),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, child) {
+          return Transform.translate(
+            offset: Offset(0, 20 * (1 - value)),
+            child: Opacity(
+              opacity: value,
+              child: child,
+            ),
+          );
+        },
+        child: _buildBundleCard(bundle, const [Color(0xFF6366F1), Color(0xFF4F46E5)], 'FLEXIBLE'),
+      );
     }).toList();
   }
 
-  // Build cards from UserBundle data for FREE plan type
   List<Widget> _buildFreeBundleCardsFromUserBundles(List<UserBundle> bundles) {
-    return bundles.map((bundle) {
-      return _buildBundleCard(bundle, const Color(0xFF10B981), 'FREE');
+    return bundles.asMap().entries.map((entry) {
+      final index = entry.key;
+      final bundle = entry.value;
+      return TweenAnimationBuilder<double>(
+        duration: Duration(milliseconds: 400 + (index * 100)),
+        tween: Tween(begin: 0.0, end: 1.0),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, child) {
+          return Transform.translate(
+            offset: Offset(0, 20 * (1 - value)),
+            child: Opacity(
+              opacity: value,
+              child: child,
+            ),
+          );
+        },
+        child: _buildBundleCard(bundle, const [Color(0xFF10B981), Color(0xFF059669)], 'FREE'),
+      );
     }).toList();
   }
 
-  Widget _buildBundleCard(UserBundle bundle, Color color, String planLabel) {
-    // For BUNDLE/FLEXIBLE plans, show total topics count
-    // For FREE plans, show actual enrolled count from _enrolledCourses
+  Widget _buildBundleCard(UserBundle bundle, List<Color> gradient, String planLabel) {
     int displayTopicsCount;
     if (planLabel == 'BUNDLE' || planLabel == 'FLEXIBLE') {
       displayTopicsCount = _getTopicsCountForCategoryId(bundle.categoryId);
     } else {
-      // FREE plan: count actual enrolled topics in this category
-      displayTopicsCount = _enrolledCourses.where((c) => 
-        c.categoryId == bundle.categoryId && c.price == 0
+      displayTopicsCount = _enrolledCourses.where((c) =>
+      c.categoryId == bundle.categoryId && c.price == 0
       ).length;
-      // Fallback to accessibleTopicsCount if no enrolled courses found
       if (displayTopicsCount == 0) {
         displayTopicsCount = bundle.accessibleTopicsCount;
       }
     }
-    
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Container(
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: color,
-            width: 1.5,
-          ),
+          color: Colors.white.withOpacity(0.90),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
           boxShadow: [
             BoxShadow(
-              color: color.withOpacity(0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
             ),
           ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.all(12),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              debugPrint('Viewing topics for: ${bundle.categoryName} (category ${bundle.categoryId})');
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => BundleTopicsDetailScreen(
+                    categoryId: bundle.categoryId,
+                    categoryName: bundle.categoryName,
+                    userId: _userId ?? 0,
+                  ),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
               child: Row(
                 children: [
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: 54,
+                    height: 54,
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
+                      gradient: LinearGradient(colors: gradient),
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                          color: gradient[0].withOpacity(0.25),
+                          blurRadius: 14,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
                     ),
-                    child: Center(
-                      child: Icon(
-                        Icons.card_giftcard_rounded,
-                        color: color,
-                        size: 22,
-                      ),
+                    child: const Icon(
+                      Icons.card_giftcard_rounded,
+                      color: Colors.white,
+                      size: 26,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TranslatedText(
-                          bundle.categoryName,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF1F2937),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 3),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: color,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: TranslatedText(
-                            planLabel,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // Body
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(12),
-                  bottomRight: Radius.circular(12),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const TranslatedText(
-                            'Topics:',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF9CA3AF),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '$displayTopicsCount',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF1F2937),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (bundle.bundlePrice > 0)
                         Row(
                           children: [
-                            const TranslatedText(
-                              'Price:',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFF9CA3AF),
-                                fontWeight: FontWeight.w600,
+                            Expanded(
+                              child: TranslatedText(
+                                bundle.categoryName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  color: _textColor,
+                                  letterSpacing: -0.2,
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '₹${bundle.bundlePrice.toStringAsFixed(0)}',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFFDC2626),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: gradient[0].withOpacity(0.10),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: gradient[0].withOpacity(0.18),
+                                ),
+                              ),
+                              child: Text(
+                                planLabel,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
+                                  color: gradient[0],
+                                  letterSpacing: 0.4,
+                                ),
                               ),
                             ),
                           ],
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(
-                        bundle.futureTopicsIncluded
-                            ? Icons.check_circle_rounded
-                            : Icons.cancel_rounded,
-                        color: bundle.futureTopicsIncluded
-                            ? const Color(0xFF10B981)
-                            : const Color(0xFFDC2626),
-                        size: 14,
-                      ),
-                      const SizedBox(width: 6),
-                      TranslatedText(
-                        'Future topics ${bundle.futureTopicsIncluded ? 'included' : 'not included'}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: bundle.futureTopicsIncluded
-                              ? const Color(0xFF10B981)
-                              : const Color(0xFFDC2626),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: color,
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        elevation: 0,
-                      ),
-                      onPressed: () {
-                        debugPrint('Viewing topics for: ${bundle.categoryName} (category ${bundle.categoryId})');
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BundleTopicsDetailScreen(
-                              categoryId: bundle.categoryId,
-                              categoryName: bundle.categoryName,
-                              userId: _userId ?? 0,
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            _compactMetaChip(
+                              icon: Icons.library_books_outlined,
+                              text: '$displayTopicsCount topics',
+                              tone: gradient[0],
                             ),
-                          ),
-                        );
-                      },
-                      child: const TranslatedText(
-                        'View Topics',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
+                            if (bundle.bundlePrice > 0)
+                              _compactMetaChip(
+                                icon: Icons.currency_rupee_rounded,
+                                text: '${bundle.bundlePrice.toStringAsFixed(0)}',
+                                tone: const Color(0xFFDC2626),
+                              ),
+                            _compactMetaChip(
+                              icon: bundle.futureTopicsIncluded
+                                  ? Icons.check_circle_rounded
+                                  : Icons.cancel_rounded,
+                              text: bundle.futureTopicsIncluded
+                                  ? 'Future included'
+                                  : 'Future not included',
+                              tone: bundle.futureTopicsIncluded
+                                  ? const Color(0xFF059669)
+                                  : const Color(0xFFDC2626),
+                            ),
+                          ],
                         ),
-                      ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE5E7EB)),
+                    ),
+                    child: const Icon(
+                      Icons.arrow_forward_rounded,
+                      color: _accentColor,
                     ),
                   ),
                 ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  List<Widget> _buildIndividualCards(List<CourseTopic> courses) {
-    return courses.map((course) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 16),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: const Color(0xFFE5E7EB),
-              width: 1,
+  Widget _compactMetaChip({
+    required IconData icon,
+    required String text,
+    required Color tone,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: tone.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: tone.withOpacity(0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: tone),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: tone,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
           ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.all(16),
-            leading: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildIndividualCards(List<CourseTopic> courses) {
+    return courses.asMap().entries.map((entry) {
+      final index = entry.key;
+      final course = entry.value;
+      return TweenAnimationBuilder<double>(
+        duration: Duration(milliseconds: 400 + (index * 80)),
+        tween: Tween(begin: 0.0, end: 1.0),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, child) {
+          return Transform.translate(
+            offset: Offset(0, 20 * (1 - value)),
+            child: Opacity(
+              opacity: value,
+              child: child,
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: const Color(0xFFE5E7EB),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
                 ),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.article_outlined,
-                color: Colors.white,
-                size: 24,
-              ),
+              ],
             ),
-            title: TranslatedText(
-              course.title,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: _textColor,
+            child: ListTile(
+              contentPadding: const EdgeInsets.all(16),
+              leading: Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF6366F1).withOpacity(0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.article_outlined,
+                  color: Colors.white,
+                  size: 26,
+                ),
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEEF2FF),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const TranslatedText(
-                      'INDIVIDUAL',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF6366F1),
+              title: TranslatedText(
+                course.title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: _textColor,
+                  letterSpacing: -0.2,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEEF2FF),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const TranslatedText(
+                        'INDIVIDUAL',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF6366F1),
+                          letterSpacing: 0.3,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Icon(
-                    Icons.check_circle,
-                    color: Color(0xFF10B981),
-                    size: 16,
-                  ),
-                  const SizedBox(width: 4),
-                  const TranslatedText(
-                    'Enrolled',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF10B981),
-                      fontWeight: FontWeight.w600,
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.check_circle,
+                        color: Color(0xFF10B981),
+                        size: 14,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.arrow_forward_ios_rounded),
-              iconSize: 18,
-              color: _mutedColor,
-              onPressed: () {
+              trailing: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _accentColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.arrow_forward_rounded,
+                  size: 20,
+                  color: _accentColor,
+                ),
+              ),
+              onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -1532,14 +1298,6 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
                 );
               },
             ),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => TopicDetailScreen(topic: course),
-                ),
-              );
-            },
           ),
         ),
       );
@@ -1547,12 +1305,13 @@ class _AllCoursesScreenState extends State<AllCoursesScreen> with SingleTickerPr
   }
 }
 
-class _CourseCard extends StatelessWidget {
-  const _CourseCard({
+class _EnhancedCourseCard extends StatelessWidget {
+  const _EnhancedCourseCard({
     required this.course,
     required this.isWishlisted,
     required this.onToggleWishlist,
     required this.onTap,
+    required this.index,
     this.hidePriceBadge = false,
   });
 
@@ -1560,6 +1319,7 @@ class _CourseCard extends StatelessWidget {
   final bool isWishlisted;
   final Future<void> Function() onToggleWishlist;
   final VoidCallback onTap;
+  final int index;
   final bool hidePriceBadge;
 
   @override
@@ -1581,178 +1341,535 @@ class _CourseCard extends StatelessWidget {
         ? const Color(0xFF22C55E)
         : (isFree ? const Color(0xFF10B981) : _accentColor);
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: _cardBackground,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: const [
-            BoxShadow(
-              color: _shadowColor,
-              blurRadius: 12,
-              offset: Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Thumbnail with price + wishlist
-            Stack(
-              children: [
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-                  child: SizedBox(
-                    height: 110,
-                    width: double.infinity,
-                    child: TopicImage(
-                      imageUrl: course.thumbnailUrl,
-                      title: course.title,
-                      fit: BoxFit.cover,
+    return TweenAnimationBuilder<double>(
+      duration: Duration(milliseconds: 400 + (index * 80)),
+      tween: Tween(begin: 0.0, end: 1.0),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        return Transform.translate(
+          offset: Offset(0, 30 * (1 - value)),
+          child: Opacity(
+            opacity: value,
+            child: child,
+          ),
+        );
+      },
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: _cardBackground,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                    child: SizedBox(
+                      height: 120,
+                      width: double.infinity,
+                      child: TopicImage(
+                        imageUrl: course.thumbnailUrl,
+                        title: course.title,
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
-                ),
-                if (!hidePriceBadge)
-                  Positioned(
-                    right: 10,
-                    top: 10,
+                  // Gradient overlay for better text visibility
+                  Positioned.fill(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: priceColor,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x1A000000),
-                            blurRadius: 8,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        priceLabel,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withOpacity(0.3),
+                          ],
+                          stops: const [0.6, 1.0],
                         ),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                       ),
                     ),
                   ),
-                Positioned(
-                  left: 10,
-                  top: 10,
-                  child: _WishlistPill(
-                    isActive: isWishlisted,
-                    onToggle: onToggleWishlist,
-                  ),
-                ),
-              ],
-            ),
-            // Info section
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TranslatedText(
-                      course.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _textColor,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    TranslatedText(
-                      course.categoryName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _mutedColor,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Expanded(
-                      child: TranslatedText(
-                        _truncateDescription(
-                          course.description.isNotEmpty
-                              ? course.description
-                              : 'Learn ${course.categoryName.toLowerCase()} fundamentals',
-                          100,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _mutedColor,
-                          fontSize: 10,
-                          height: 1.3,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: _accentColor.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(4),
+                  if (!hidePriceBadge)
+                    Positioned(
+                      right: 12,
+                      top: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [priceColor, priceColor.withOpacity(0.8)],
                           ),
-                          child: TranslatedText(
-                            course.difficulty.toUpperCase(),
-                            style: const TextStyle(
-                              color: _accentColor,
-                              fontSize: 8,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.schedule_outlined, 
-                              size: 11, 
-                              color: _mutedColor.withOpacity(0.7),
-                            ),
-                            const SizedBox(width: 3),
-                            TranslatedText(
-                              course.durationMinutes > 0
-                                  ? '${course.durationMinutes}m'
-                                  : 'Self',
-                              style: const TextStyle(
-                                color: _mutedColor,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                              ),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: priceColor.withOpacity(0.4),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
                             ),
                           ],
                         ),
-                      ],
+                        child: Text(
+                          priceLabel,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
                     ),
-                  ],
+                  Positioned(
+                    left: 12,
+                    top: 12,
+                    child: _EnhancedWishlistPill(
+                      isActive: isWishlisted,
+                      onToggle: onToggleWishlist,
+                    ),
+                  ),
+                ],
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TranslatedText(
+                        course.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _textColor,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          height: 1.25,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _accentColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: TranslatedText(
+                          course.categoryName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: _accentColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: TranslatedText(
+                          _truncateDescription(
+                            course.description.isNotEmpty
+                                ? course.description
+                                : 'Learn ${course.categoryName.toLowerCase()} fundamentals',
+                            80,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: _mutedColor.withOpacity(0.9),
+                            fontSize: 11,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  _accentColor.withOpacity(0.15),
+                                  _accentColor.withOpacity(0.08),
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: TranslatedText(
+                              course.difficulty.toUpperCase(),
+                              style: TextStyle(
+                                color: _accentColor,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: _mutedColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.schedule_outlined,
+                                  size: 11,
+                                  color: _mutedColor,
+                                ),
+                                const SizedBox(width: 4),
+                                TranslatedText(
+                                  course.durationMinutes > 0
+                                      ? '${course.durationMinutes}m'
+                                      : 'Self',
+                                  style: TextStyle(
+                                    color: _mutedColor,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
+enum _SectionTone { amber, indigo, green, violet }
 
+Color _toneColor(_SectionTone tone) {
+  switch (tone) {
+    case _SectionTone.amber:
+      return const Color(0xFFF59E0B);
+    case _SectionTone.indigo:
+      return const Color(0xFF4F46E5);
+    case _SectionTone.green:
+      return const Color(0xFF059669);
+    case _SectionTone.violet:
+      return const Color(0xFF7C3AED);
+  }
+}
 
-class _WishlistPill extends StatelessWidget {
-  const _WishlistPill({required this.isActive, required this.onToggle});
+class _PremiumEnrollmentsTopBar extends StatelessWidget {
+  const _PremiumEnrollmentsTopBar();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.75),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: _accentColor.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: _accentColor.withOpacity(0.18),
+                width: 1,
+              ),
+            ),
+            child: const Icon(Icons.school_rounded, color: _accentColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                TranslatedText(
+                  'My Learning',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: _textColor,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                SizedBox(height: 2),
+                TranslatedText(
+                  'Your active plans and enrolled topics',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _mutedColor,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: Row(
+              children: const [
+                Icon(Icons.auto_graph_rounded, size: 16, color: _mutedColor),
+                SizedBox(width: 6),
+                TranslatedText(
+                  'Progress',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _mutedColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PremiumSectionHeader extends StatelessWidget {
+  const _PremiumSectionHeader({
+    required this.title,
+    required this.subtitle,
+    required this.count,
+    required this.icon,
+    required this.tone,
+  });
+
+  final String title;
+  final String subtitle;
+  final int count;
+  final IconData icon;
+  final _SectionTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _toneColor(tone);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.82),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: c.withOpacity(0.10),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: c.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: c.withOpacity(0.18)),
+            ),
+            child: Icon(icon, color: c, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TranslatedText(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: _textColor,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                TranslatedText(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: _mutedColor,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: c.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: c.withOpacity(0.18)),
+            ),
+            child: Text(
+              '$count',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+                color: c,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PremiumListContainer extends StatelessWidget {
+  const _PremiumListContainer({
+    required this.tone,
+    required this.children,
+    this.heading,
+    this.subheading,
+    this.icon,
+  });
+
+  final _SectionTone tone;
+  final List<Widget> children;
+  final String? heading;
+  final String? subheading;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _toneColor(tone);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.96),
+            Colors.white.withOpacity(0.90),
+            c.withOpacity(0.05),
+          ],
+          stops: const [0.0, 0.6, 1.0],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: c.withOpacity(0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (heading != null) ...[
+            Row(
+              children: [
+                if (icon != null)
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: c.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: c.withOpacity(0.18)),
+                    ),
+                    child: Icon(icon, color: c, size: 20),
+                  ),
+                if (icon != null) const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        heading!,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          color: _textColor,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      if (subheading != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            subheading!,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: _mutedColor,
+                              height: 1.25,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
+          ...children
+              .asMap()
+              .entries
+              .map((entry) {
+                final isLast = entry.key == children.length - 1;
+                return Padding(
+                  padding: EdgeInsets.only(bottom: isLast ? 0 : 8),
+                  child: entry.value,
+                );
+              })
+              .toList(),
+        ],
+      ),
+    );
+  }
+}
+
+class _EnhancedWishlistPill extends StatelessWidget {
+  const _EnhancedWishlistPill({required this.isActive, required this.onToggle});
   final bool isActive;
   final Future<void> Function() onToggle;
 
@@ -1760,16 +1877,20 @@ class _WishlistPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () => onToggle(),
-      child: Container(
-        padding: const EdgeInsets.all(8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutBack,
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: const [
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
             BoxShadow(
-              color: Color(0x1A000000),
-              blurRadius: 12,
-              offset: Offset(0, 4),
+              color: isActive
+                  ? const Color(0xFFEF4444).withOpacity(0.3)
+                  : Colors.black.withOpacity(0.1),
+              blurRadius: isActive ? 12 : 8,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -1794,26 +1915,42 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.cast_for_education_outlined,
-                size: 64, color: _mutedColor),
-            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    _accentColor.withOpacity(0.1),
+                    _accentColor.withOpacity(0.05),
+                  ],
+                ),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.cast_for_education_outlined,
+                size: 64,
+                color: _mutedColor,
+              ),
+            ),
+            const SizedBox(height: 24),
             const TranslatedText(
               'Courses will appear here soon',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _textColor,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             const TranslatedText(
               'Looks like the catalogue is still loading. Pull down to refresh.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _mutedColor,
-                fontSize: 13,
-                height: 1.4,
+                fontSize: 14,
+                height: 1.5,
               ),
             ),
           ],
@@ -1832,6 +1969,7 @@ class _EnrollmentsEmptyState extends StatelessWidget {
       icon: Icons.school_outlined,
       title: 'No enrollments yet',
       subtitle: 'Start your learning journey by enrolling in a course.',
+      gradient: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
     );
   }
 }
@@ -1845,6 +1983,7 @@ class _EnrollmentsSignInPrompt extends StatelessWidget {
       icon: Icons.lock_outline,
       title: 'Sign in to view enrollments',
       subtitle: 'Log in to keep track of the courses you have joined.',
+      gradient: [Color(0xFFF59E0B), Color(0xFFD97706)],
     );
   }
 }
@@ -1854,11 +1993,13 @@ class _EnrollmentsMessage extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    required this.gradient,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final List<Color> gradient;
 
   @override
   Widget build(BuildContext context) {
@@ -1868,25 +2009,40 @@ class _EnrollmentsMessage extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 64, color: _mutedColor),
-            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: gradient),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: gradient[0].withOpacity(0.3),
+                    blurRadius: 30,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child: Icon(icon, size: 64, color: Colors.white),
+            ),
+            const SizedBox(height: 24),
             TranslatedText(
               title,
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: _textColor,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             TranslatedText(
               subtitle,
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: _mutedColor,
-                fontSize: 13,
-                height: 1.4,
+                fontSize: 15,
+                height: 1.5,
               ),
             ),
           ],
@@ -1909,29 +2065,59 @@ class _CoursesError extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.wifi_off_rounded, size: 64, color: _mutedColor),
-            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.red.withOpacity(0.2),
+                    blurRadius: 20,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.wifi_off_rounded,
+                size: 64,
+                color: Colors.red.shade400,
+              ),
+            ),
+            const SizedBox(height: 24),
             TranslatedText(
               message,
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: _textColor,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: () => onRetry(showLoader: true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _accentColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 4,
+                shadowColor: _accentColor.withOpacity(0.4),
+              ),
+              icon: const Icon(Icons.refresh_rounded, size: 22),
+              label: const TranslatedText(
+                'Try again',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
                 ),
               ),
-              icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-              label: const TranslatedText('Try again',
-                  style: TextStyle(color: Colors.white)),
             ),
           ],
         ),

@@ -76,11 +76,20 @@ class TopicImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Always use fallback image to show consistent preview
-    return Container(
+    final hasUrl = imageUrl.isNotEmpty;
+
+    return SizedBox(
       width: width,
       height: height,
-      child: TopicThumbnailFallback(title: title),
+      child: hasUrl
+          ? Image.network(
+              imageUrl,
+              fit: fit,
+              errorBuilder: (context, error, stackTrace) {
+                return TopicThumbnailFallback(title: title);
+              },
+            )
+          : TopicThumbnailFallback(title: title),
     );
   }
 }

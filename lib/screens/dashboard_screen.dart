@@ -41,7 +41,7 @@ class _ModuleSearchResult {
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key, this.onSeeAllCourses, this.onSeeAllPaidCourses});
 
-  final VoidCallback? onSeeAllCourses;
+  final void Function(String? categoryName)? onSeeAllCourses;
   final VoidCallback? onSeeAllPaidCourses;
 
   @override
@@ -273,6 +273,8 @@ class _DashboardState extends State<Dashboard> {
       final storedName = prefs.getString('thinkcyber_user_name');
       final storedEmail = prefs.getString('thinkcyber_email');
       final storedUserId = prefs.getInt('thinkcyber_user_id');
+
+      await Future.delayed(const Duration(milliseconds: 1500));
 
       // Fetch topics with userId to get basic enrollment info
       final response = await _api.fetchTopics(userId: storedUserId);
@@ -575,7 +577,9 @@ class _DashboardState extends State<Dashboard> {
     if (showPaidTab) {
       widget.onSeeAllPaidCourses?.call();
     } else {
-      widget.onSeeAllCourses?.call();
+      final selectedCategoryName = _selectedCategory?.name ??
+          (_activeCategory != 'All' ? _activeCategory : null);
+      widget.onSeeAllCourses?.call(selectedCategoryName);
     }
   }
 
@@ -752,6 +756,10 @@ class _DashboardState extends State<Dashboard> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading && _topics.isEmpty) {
+      return const _FullPageShimmer();
+    }
+
     return Scaffold(
       backgroundColor: _background,
       body: SafeArea(
@@ -788,10 +796,7 @@ class _DashboardState extends State<Dashboard> {
     if (_categoriesLoading) {
       return const Padding(
         padding: EdgeInsets.symmetric(horizontal: 16),
-        child: SizedBox(
-          height: 200,
-          child: Center(child: CircularProgressIndicator()),
-        ),
+        child: _ShimmerCategories(),
       );
     }
 
@@ -869,6 +874,32 @@ class _DashboardState extends State<Dashboard> {
     final primaryColor = colors['primary'] as Color;
     final lightColor = colors['light'] as Color;
 
+    final String thumbnail = _topics
+            .firstWhere(
+              (t) => t.categoryName == category.name && t.thumbnailUrl.isNotEmpty,
+              orElse: () => _topics.firstWhere(
+                (t) => t.categoryName == category.name,
+                orElse: () => CourseTopic(
+                  id: -1,
+                  title: category.name,
+                  description: category.description,
+                  categoryId: category.id,
+                  categoryName: category.name,
+                  subcategoryId: null,
+                  subcategoryName: null,
+                  difficulty: 'Beginner',
+                  status: 'active',
+                  isFree: true,
+                  isFeatured: false,
+                  price: 0,
+                  durationMinutes: 0,
+                  thumbnailUrl: '',
+                ),
+              ),
+            )
+            .thumbnailUrl ??
+        '';
+
     IconData getPlanIcon() {
       switch (planType) {
         case 'FREE':
@@ -936,23 +967,19 @@ class _DashboardState extends State<Dashboard> {
             mainAxisSize: MainAxisSize.max,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Icon, Title, Topics, and Price in Row
+              // Thumbnail/Icon, Title, Topics, and Price in Row
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Icon
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: lightColor,
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Center(
-                      child: Icon(
-                        getPlanIcon(),
-                        color: primaryColor,
-                        size: 24,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: 54,
+                      height: 54,
+                      child: TopicImage(
+                        imageUrl: thumbnail,
+                        title: category.name,
+                        fit: BoxFit.cover,
                       ),
                     ),
                   ),
@@ -1046,15 +1073,7 @@ class _DashboardState extends State<Dashboard> {
 
   Widget _buildModernTopicsGrid() {
     if (_isLoading && _topics.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: LottieLoader(
-            width: 120,
-            height: 120,
-          ),
-        ),
-      );
+      return _ShimmerGrid(count: 10);
     }
 
     if (_errorMessage != null && _topics.isEmpty) {
@@ -1109,129 +1128,21 @@ class _DashboardState extends State<Dashboard> {
             ],
           ),
           const SizedBox(height: 14),
-          // Calculate pagination
-          Builder(
-            builder: (context) {
-              final totalPages = (filtered.length / _topicsPerPage).ceil();
-              final startIndex = _currentPage * _topicsPerPage;
-              final endIndex = (startIndex + _topicsPerPage).clamp(0, filtered.length);
-              final pageTopics = filtered.sublist(startIndex, endIndex);
-              
-              return Column(
-                children: [
-                  // Pagination dots at top
-                  if (totalPages > 1) ...[
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(totalPages, (index) {
-                        final isActive = _currentPage == index;
-                        return GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _currentPage = index;
-                            });
-                          },
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeInOut,
-                            margin: const EdgeInsets.symmetric(horizontal: 4),
-                            width: isActive ? 32 : 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: isActive
-                                  ? _accent
-                                  : const Color(0xFFD1D5DB),
-                              borderRadius: BorderRadius.circular(4),
-                              boxShadow: isActive
-                                  ? [
-                                      BoxShadow(
-                                        color: _accent.withOpacity(0.4),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ]
-                                  : [],
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                    const SizedBox(height: 4),
-                    // Page counter text
-                    TranslatedText(
-                      'Page ${_currentPage + 1} of $totalPages',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF9CA3AF),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  // Swipeable grid with smooth animation
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 700),
-                    transitionBuilder: (child, animation) {
-                      // Animate based on swipe direction
-                      final beginOffset = _swipeDirection > 0 
-                        ? const Offset(1, 0)    // Swipe left (next): slide from right
-                        : const Offset(-1, 0);  // Swipe right (previous): slide from left
-                      
-                      return SlideTransition(
-                        position: Tween<Offset>(
-                          begin: beginOffset,
-                          end: Offset.zero,
-                        ).animate(
-                          CurvedAnimation(parent: animation, curve: Curves.easeInOut),
-                        ),
-                        child: FadeTransition(
-                          opacity: animation,
-                          child: child,
-                        ),
-                      );
-                    },
-                    child: GestureDetector(
-                      key: ValueKey<int>(_currentPage),
-                      onHorizontalDragEnd: (DragEndDetails details) {
-                        // Swipe right to previous page
-                        if (details.primaryVelocity! > 0) {
-                          if (_currentPage > 0) {
-                            setState(() {
-                              _swipeDirection = -1; // Swiping right (previous)
-                              _currentPage--;
-                            });
-                          }
-                        }
-                        // Swipe left to next page
-                        else if (details.primaryVelocity! < 0) {
-                          if (_currentPage < totalPages - 1) {
-                            setState(() {
-                              _swipeDirection = 1; // Swiping left (next)
-                              _currentPage++;
-                            });
-                          }
-                        }
-                      },
-                      child: GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        padding: EdgeInsets.zero,
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 0.75,
-                        ),
-                        itemCount: pageTopics.length,
-                        itemBuilder: (context, index) {
-                          final topic = pageTopics[index];
-                          return _buildModernTopicCard(topic);
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              );
+
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 0.75,
+            ),
+            itemCount: filtered.length,
+            itemBuilder: (context, index) {
+              final topic = filtered[index];
+              return _buildModernTopicCard(topic);
             },
           ),
         ],
@@ -3904,6 +3815,50 @@ class _ErrorCard extends StatelessWidget {
   }
 }
 
+class _PageNudgeButton extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _PageNudgeButton({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color bg = enabled
+        ? _DashboardState._accent.withValues(alpha: 0.12)
+        : _DashboardState._muted.withValues(alpha: 0.08);
+    final Color border = enabled
+        ? _DashboardState._accent.withValues(alpha: 0.25)
+        : _DashboardState._muted.withValues(alpha: 0.15);
+    final Color iconColor = enabled ? _DashboardState._accent : _DashboardState._muted;
+
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 200),
+      opacity: enabled ? 1 : 0.4,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: border),
+            ),
+            child: Icon(icon, size: 20, color: iconColor),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _EmptyCard extends StatelessWidget {
   final VoidCallback onRetry;
   const _EmptyCard({required this.onRetry});
@@ -3948,6 +3903,191 @@ class _EmptyCard extends StatelessWidget {
             label: const TranslatedText('Refresh'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ShimmerGrid extends StatefulWidget {
+  const _ShimmerGrid({required this.count});
+  final int count;
+
+  @override
+  State<_ShimmerGrid> createState() => _ShimmerGridState();
+}
+
+class _ShimmerGridState extends State<_ShimmerGrid> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      itemCount: widget.count,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 0.75,
+      ),
+      itemBuilder: (context, index) {
+        return AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            final t = _controller.value;
+            final double start = (t - 0.3).clamp(0.0, 1.0);
+            final double end = (t + 0.3).clamp(0.0, 1.0);
+
+            return Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  begin: Alignment(-1, -0.3),
+                  end: Alignment(1, 0.3),
+                  colors: const [Color(0xFFE5E7EB), Color(0xFFF3F4F6), Color(0xFFE5E7EB)],
+                  stops: [start, t, end],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _ShimmerBox extends StatefulWidget {
+  const _ShimmerBox({required this.width, required this.height, this.radius = 12});
+  final double width;
+  final double height;
+  final double radius;
+
+  @override
+  State<_ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<_ShimmerBox> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))
+      ..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final t = _controller.value;
+        final double start = (t - 0.3).clamp(0.0, 1.0);
+        final double end = (t + 0.3).clamp(0.0, 1.0);
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.radius),
+            gradient: LinearGradient(
+              begin: Alignment(-1, -0.2),
+              end: Alignment(1, 0.2),
+              colors: const [Color(0xFFE5E7EB), Color(0xFFF3F4F6), Color(0xFFE5E7EB)],
+              stops: [start, t, end],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ShimmerCategories extends StatelessWidget {
+  const _ShimmerCategories();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        _ShimmerBox(width: 120, height: 16),
+        SizedBox(height: 12),
+        SizedBox(
+          height: 100,
+          child: _ShimmerCategoriesRow(),
+        ),
+      ],
+    );
+  }
+}
+
+class _ShimmerCategoriesRow extends StatelessWidget {
+  const _ShimmerCategoriesRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: 4,
+      separatorBuilder: (_, __) => const SizedBox(width: 12),
+      itemBuilder: (_, __) => const _ShimmerBox(width: 160, height: 90, radius: 14),
+    );
+  }
+}
+
+class _FullPageShimmer extends StatelessWidget {
+  const _FullPageShimmer();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _DashboardState._background,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                _ShimmerBox(width: 180, height: 28, radius: 8),
+                SizedBox(height: 8),
+                _ShimmerBox(width: 260, height: 16, radius: 8),
+                SizedBox(height: 24),
+                _ShimmerCategories(),
+                SizedBox(height: 28),
+                _ShimmerBox(width: 140, height: 20, radius: 8),
+                SizedBox(height: 12),
+                _ShimmerGrid(count: 10),
+                SizedBox(height: 30),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

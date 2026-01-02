@@ -21,11 +21,261 @@ const _darkText = Color(0xFF2D3142);
 const _lightText = Color(0xFF9094A6);
 const _cardBg = Color(0xFFF8F9FA);
 
+Widget _metaPill(IconData icon, String label) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: Colors.white70),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _PipOverlayManager {
+  _PipOverlayManager._();
+  static final _PipOverlayManager instance = _PipOverlayManager._();
+
+  OverlayEntry? _entry;
+
+  void showYoutube(
+    BuildContext context, {
+    required YoutubePlayerController controller,
+    required List<_PlaylistItem> queue,
+    required int currentIndex,
+    VoidCallback? onClose,
+  }) {
+    close();
+    _entry = OverlayEntry(
+      builder: (_) => _YoutubePipOverlay(
+        controller: controller,
+        queue: queue,
+        currentIndex: currentIndex,
+        onClose: onClose,
+      ),
+    );
+    Overlay.of(context, rootOverlay: true).insert(_entry!);
+  }
+
+  void showUploaded(
+    BuildContext context, {
+    required List<TopicVideo> playlist,
+    required int currentIndex,
+    VoidCallback? onClose,
+  }) {
+    close();
+    _entry = OverlayEntry(
+      builder: (_) => _UploadedPipOverlay(
+        playlist: playlist,
+        currentIndex: currentIndex,
+        onClose: onClose,
+      ),
+    );
+    Overlay.of(context, rootOverlay: true).insert(_entry!);
+  }
+
+  void close() {
+    _entry?.remove();
+    _entry = null;
+  }
+}
+
+class _DraggablePipFrame extends StatefulWidget {
+  const _DraggablePipFrame({required this.child, this.onClose});
+  final Widget child;
+  final VoidCallback? onClose;
+
+  @override
+  State<_DraggablePipFrame> createState() => _DraggablePipFrameState();
+}
+
+class _DraggablePipFrameState extends State<_DraggablePipFrame> {
+  Offset _offset = const Offset(12, 12);
+
+  @override
+  Widget build(BuildContext context) {
+    final screen = MediaQuery.of(context).size;
+    return Positioned(
+      left: _offset.dx,
+      bottom: _offset.dy,
+      child: GestureDetector(
+        onPanUpdate: (details) {
+          setState(() {
+            final dx = (_offset.dx + details.delta.dx).clamp(8.0, screen.width - 228);
+            final dy = (_offset.dy - details.delta.dy).clamp(8.0, screen.height - 180);
+            _offset = Offset(dx, dy);
+          });
+        },
+        onTap: widget.onClose,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class _YoutubePipOverlay extends StatelessWidget {
+  const _YoutubePipOverlay({
+    required this.controller,
+    required this.queue,
+    required this.currentIndex,
+    this.onClose,
+  });
+
+  final YoutubePlayerController controller;
+  final List<_PlaylistItem> queue;
+  final int currentIndex;
+  final VoidCallback? onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = queue.isNotEmpty ? queue[currentIndex].title : 'Playing';
+    return _DraggablePipFrame(
+      onClose: () {
+        _PipOverlayManager.instance.close();
+        onClose?.call();
+      },
+      child: _MiniShell(
+        title: title,
+        body: YoutubePlayer(
+          controller: controller,
+          showVideoProgressIndicator: true,
+        ),
+      ),
+    );
+  }
+}
+
+class _UploadedPipOverlay extends StatefulWidget {
+  const _UploadedPipOverlay({
+    required this.playlist,
+    required this.currentIndex,
+    this.onClose,
+  });
+
+  final List<TopicVideo> playlist;
+  final int currentIndex;
+  final VoidCallback? onClose;
+
+  @override
+  State<_UploadedPipOverlay> createState() => _UploadedPipOverlayState();
+}
+
+class _UploadedPipOverlayState extends State<_UploadedPipOverlay> {
+  late WebViewController _controller;
+  Offset _offset = const Offset(12, 12);
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent('Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36');
+    _load(widget.playlist[widget.currentIndex].videoUrl);
+  }
+
+  void _load(String url) {
+    final htmlContent = '''
+    <html><head><style>body,html{margin:0;padding:0;background:#000;}</style></head>
+    <body><video controls autoplay style="width:100%;height:100%;object-fit:contain;" src="$url"></video></body></html>
+    ''';
+    _controller.loadHtmlString(htmlContent);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.playlist[widget.currentIndex].title;
+    return _DraggablePipFrame(
+      onClose: () {
+        _PipOverlayManager.instance.close();
+        widget.onClose?.call();
+      },
+      child: _MiniShell(
+        title: title,
+        body: WebViewWidget(controller: _controller),
+      ),
+    );
+  }
+}
+
+class _MiniShell extends StatelessWidget {
+  const _MiniShell({required this.title, required this.body});
+  final String title;
+  final Widget body;
+
+  double get width => 220;
+  double get height => 140;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4))],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AspectRatio(aspectRatio: 16 / 9, child: body),
+            Container(
+              color: Colors.black87,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                    padding: EdgeInsets.zero,
+                    onPressed: () {
+                      _PipOverlayManager.instance.close();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _UploadedVideoPlayerScreen extends StatefulWidget {
   final String videoUrl;
   final String title;
+  final List<TopicVideo> playlist;
+  final int initialIndex;
 
-  const _UploadedVideoPlayerScreen({required this.videoUrl, required this.title});
+  const _UploadedVideoPlayerScreen({
+    required this.videoUrl,
+    required this.title,
+    this.playlist = const [],
+    this.initialIndex = 0,
+  });
 
   @override
   State<_UploadedVideoPlayerScreen> createState() => _UploadedVideoPlayerScreenState();
@@ -33,13 +283,192 @@ class _UploadedVideoPlayerScreen extends StatefulWidget {
 
 class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> {
   late WebViewController _webViewController;
+  late List<TopicVideo> _queue;
+  late int _currentIndex;
+  bool _isMini = false;
+  Offset _miniOffset = const Offset(12, 12);
+  bool _handedToGlobalPip = false;
 
   @override
   void initState() {
     super.initState();
-    debugPrint('Video URL: ${widget.videoUrl}');
-    
-    // Create the HTML content for video player
+    _queue = widget.playlist.isNotEmpty
+        ? widget.playlist
+        : [TopicVideo(id: 0, title: widget.title, videoUrl: widget.videoUrl, thumbnailUrl: null, description: '')];
+    _currentIndex = widget.initialIndex.clamp(0, _queue.length - 1);
+
+    _webViewController = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent('Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36');
+
+    _loadVideo(_queue[_currentIndex].videoUrl);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final orientation = MediaQuery.of(context).orientation;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final playerHeight = orientation == Orientation.portrait
+        ? screenWidth * 9 / 16
+        : MediaQuery.of(context).size.height;
+
+    final player = Container(
+      color: Colors.black,
+      height: playerHeight,
+      width: double.infinity,
+      child: WebViewWidget(controller: _webViewController),
+    );
+
+    Widget portraitBody = SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          player,
+          _uploadedMetaSection(),
+          _playlistSection(),
+        ],
+      ),
+    );
+
+    return WillPopScope(
+      onWillPop: () async {
+        if (!_handedToGlobalPip) {
+          _handOffToGlobalPip();
+          return false;
+        }
+        return true;
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => _handOffToGlobalPip(),
+          ),
+          title: Text(
+            widget.title,
+            style: const TextStyle(color: Colors.white, fontSize: 16),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          actions: [
+            IconButton(
+              icon: Icon(
+                _isMini ? Icons.fullscreen : Icons.picture_in_picture_alt_outlined,
+                color: Colors.white,
+              ),
+              onPressed: () => setState(() => _isMini = !_isMini),
+            ),
+            IconButton(
+              icon: const Icon(Icons.open_in_new, color: Colors.white),
+              onPressed: _handOffToGlobalPip,
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: orientation == Orientation.portrait
+                    ? portraitBody
+                    : Row(
+                        children: [
+                          Expanded(child: player),
+                          Container(
+                            width: 300,
+                            color: Colors.black,
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _uploadedMetaSection(),
+                                  const SizedBox(height: 12),
+                                  _playlistSection(),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+              if (_isMini)
+                _DraggablePipFrame(
+                  onClose: () => setState(() => _isMini = false),
+                  child: _miniUploaded(player),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _miniUploaded(Widget player) {
+    return GestureDetector(
+      onTap: () => setState(() => _isMini = false),
+      child: Material(
+        color: Colors.transparent,
+        elevation: 8,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: 200,
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [
+              BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AspectRatio(aspectRatio: 16 / 9, child: player),
+                Container(
+                  color: Colors.black87,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _queue[_currentIndex].title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                        padding: EdgeInsets.zero,
+                        onPressed: () => setState(() => _isMini = false),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _handOffToGlobalPip() {
+    if (_handedToGlobalPip) return;
+    _handedToGlobalPip = true;
+    _PipOverlayManager.instance.showUploaded(
+      context,
+      playlist: _queue,
+      currentIndex: _currentIndex,
+      onClose: () {},
+    );
+    Navigator.of(context).pop();
+  }
+
+  void _loadVideo(String url) {
     final htmlContent = '''
     <!DOCTYPE html>
     <html>
@@ -47,60 +476,168 @@ class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> 
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <style>
-        body {
-          margin: 0;
-          padding: 0;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          height: 100vh;
-          background-color: #000;
-          font-family: Arial, sans-serif;
-        }
-        .video-container {
-          width: 100%;
-          height: 100%;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          background-color: #000;
-        }
-        video {
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-        }
-        .error {
-          color: #ff0000;
-          text-align: center;
-          padding: 20px;
-        }
+        body { margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #000; font-family: Arial, sans-serif; }
+        .video-container { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background-color: #000; }
+        video { width: 100%; height: 100%; object-fit: contain; }
       </style>
     </head>
     <body>
       <div class="video-container">
         <video controls controlsList="nodownload" autoplay disablePictureInPicture>
-          <source src="${widget.videoUrl}" type="video/mp4">
+          <source src="$url" type="video/mp4">
           Your browser does not support the video tag.
         </video>
       </div>
     </body>
     </html>
     ''';
-
-    _webViewController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent('Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36')
-      ..loadHtmlString(htmlContent);
+    _webViewController.loadHtmlString(htmlContent);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
+  Widget _uploadedMetaSection() {
+    final current = _queue[_currentIndex];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            current.title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (current.description.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              current.description,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.72),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _metaPill(Icons.play_circle_fill, 'Now playing'),
+              const SizedBox(width: 8),
+              _metaPill(Icons.screen_rotation, 'Rotate for full screen'),
+            ],
+          ),
+        ],
       ),
-      body: WebViewWidget(controller: _webViewController),
+    );
+  }
+
+  Widget _playlistSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+          child: Text(
+            'Playlist',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.9),
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          itemCount: _queue.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final item = _queue[index];
+            final isActive = index == _currentIndex;
+            return GestureDetector(
+              onTap: () {
+                setState(() {
+                  _currentIndex = index;
+                });
+                _loadVideo(item.videoUrl);
+              },
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isActive ? Colors.white10 : Colors.white.withOpacity(0.02),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '#${index + 1}',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(isActive ? 1 : 0.9),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(Icons.schedule, size: 12, color: Colors.white54),
+                              const SizedBox(width: 4),
+                              Text(
+                                item.duration ?? '',
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      isActive ? Icons.pause_circle_filled : Icons.play_circle_fill,
+                      color: Colors.white,
+                      size: 26,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 }
@@ -456,26 +993,26 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),
-                                    const Spacer(),
-                                    const Icon(
-                                      Icons.star,
-                                      color: Color(0xFFFFC107),
-                                      size: 16,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    const Text(
-                                      '(4.9)',
-                                      style: TextStyle(
-                                        color: _darkText,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const Icon(
-                                      Icons.star,
-                                      color: Color(0xFFFFC107),
-                                      size: 16,
-                                    ),
+                                    // const Spacer(),
+                                    // const Icon(
+                                    //   Icons.star,
+                                    //   color: Color(0xFFFFC107),
+                                    //   size: 16,
+                                    // ),
+                                    // const SizedBox(width: 4),
+                                    // const Text(
+                                    //   '(4.9)',
+                                    //   style: TextStyle(
+                                    //     color: _darkText,
+                                    //     fontSize: 13,
+                                    //     fontWeight: FontWeight.w600,
+                                    //   ),
+                                    // ),
+                                    // const Icon(
+                                    //   Icons.star,
+                                    //   color: Color(0xFFFFC107),
+                                    //   size: 16,
+                                    // ),
                                   ],
                                 ),
                                 const SizedBox(height: 4),
@@ -1018,15 +1555,20 @@ class _ModuleItemState extends State<_ModuleItem> {
     final bool canExpand = isUnlocked && (hasVideos || shouldShowDescription);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 16), // Increased spacing between modules
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: _cardBg,
-        borderRadius: BorderRadius.circular(16),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFF8FBFF), Color(0xFFF1F5FF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _lightText.withOpacity(0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -1036,17 +1578,24 @@ class _ModuleItemState extends State<_ModuleItem> {
             onTap: canExpand
                 ? () => setState(() => _expanded = !_expanded)
                 : null,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(18),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
                     ),
                     child: Center(
                       child: Text(
@@ -1054,7 +1603,7 @@ class _ModuleItemState extends State<_ModuleItem> {
                         style: const TextStyle(
                           color: _darkText,
                           fontSize: 16,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
@@ -1064,28 +1613,62 @@ class _ModuleItemState extends State<_ModuleItem> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TranslatedText(
-                          module.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: _darkText,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            height: 1.3,
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TranslatedText(
+                                module.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: _darkText,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Container(
+                            //   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            //   decoration: BoxDecoration(
+                            //     color: isUnlocked
+                            //         ? const Color(0xFFE8F6FF)
+                            //         : _primaryRed.withValues(alpha: 0.08),
+                            //     borderRadius: BorderRadius.circular(12),
+                            //   ),
+                            //   child: Row(
+                            //     mainAxisSize: MainAxisSize.min,
+                            //     children: [
+                            //       Icon(
+                            //         isUnlocked ? Icons.lock_open_rounded : Icons.lock_outline,
+                            //         size: 14,
+                            //         color: isUnlocked ? _primaryRed : _primaryRed,
+                            //       ),
+                            //       // const SizedBox(width: 6),
+                            //       // TranslatedText(
+                            //       //   isUnlocked ? 'Accessible' : 'Locked',
+                            //       //   style: const TextStyle(
+                            //       //     color: _primaryRed,
+                            //       //     fontSize: 11,
+                            //       //     fontWeight: FontWeight.w700,
+                            //       //   ),
+                            //       // ),
+                            //     ],
+                            //   ),
+                            // ),
+                          ],
                         ),
-                        const SizedBox(height: 4),
-                        TranslatedText(
-                          hasVideos 
-                              ? totalDuration 
-                              : shouldShowDescription
-                                  ? 'Module content available'
-                                  : 'Coming soon',
-                          style: const TextStyle(
-                            color: _lightText,
-                            fontSize: 12,
-                          ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _InfoChip(icon: Icons.movie_filter, label: hasVideos ? '${module.videos.length} lesson${module.videos.length == 1 ? '' : 's'}' : 'No videos yet'),
+                            _InfoChip(icon: Icons.schedule, label: hasVideos ? totalDuration : 'Coming soon'),
+                            if (shouldShowDescription)
+                              const _InfoChip(icon: Icons.menu_book, label: 'Summary ready'),
+                          ],
                         ),
                       ],
                     ),
@@ -1099,10 +1682,7 @@ class _ModuleItemState extends State<_ModuleItem> {
                     )
                   else if (!isUnlocked)
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                         color: _primaryRed.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
@@ -1135,11 +1715,10 @@ class _ModuleItemState extends State<_ModuleItem> {
           ),
           if (_expanded && canExpand)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 20), // More padding
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Show module description if available and user is enrolled
                   if (shouldShowDescription) ...[
                     Container(
                       width: double.infinity,
@@ -1184,13 +1763,14 @@ class _ModuleItemState extends State<_ModuleItem> {
                       ),
                     ),
                   ],
-                  // Show videos if available
                   ...module.videos.map((video) {
                     return Padding(
-                      padding: const EdgeInsets.only(bottom: 8), // Space between videos
+                      padding: const EdgeInsets.only(bottom: 8),
                       child: _VideoListItem(
                         video: video,
                         isUnlocked: isUnlocked,
+                        playlist: module.videos,
+                        initialIndex: module.videos.indexOf(video),
                       ),
                     );
                   }).toList(),
@@ -1219,11 +1799,68 @@ class _ModuleItemState extends State<_ModuleItem> {
   }
 }
 
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _lightText.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: _primaryRed),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: _darkText,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _VideoListItem extends StatelessWidget {
-  const _VideoListItem({required this.video, required this.isUnlocked});
+  const _VideoListItem({
+    required this.video,
+    required this.isUnlocked,
+    this.playlist,
+    this.initialIndex = 0,
+  });
 
   final TopicVideo video;
   final bool isUnlocked;
+  final List<TopicVideo>? playlist;
+  final int initialIndex;
+
+  String _durationLabel() {
+    if (video.durationSeconds != null && video.durationSeconds! > 0) {
+      final minutes = (video.durationSeconds! / 60).ceil();
+      return '${minutes}m';
+    }
+    if (video.duration != null && video.duration!.isNotEmpty) return video.duration!;
+    return '';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1274,6 +1911,42 @@ class _VideoListItem extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            if (video.isPreview) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _primaryRed.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'Preview',
+                  style: TextStyle(
+                    color: _primaryRed,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            if (_durationLabel().isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _cardBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _durationLabel(),
+                  style: const TextStyle(
+                    color: _darkText,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
             Icon(
               isUnlocked ? Icons.chevron_right : Icons.lock_outline,
               color: _lightText,
@@ -1299,25 +1972,30 @@ class _VideoListItem extends StatelessWidget {
   }
 
   void _playVideo(BuildContext context, TopicVideo video) {
-    // Extract YouTube video ID from URL
     String? videoId = _extractYouTubeId(video.videoUrl);
 
     if (videoId != null) {
-      // It's a YouTube video
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) =>
-              _VideoPlayerScreen(videoId: videoId, title: video.title),
+          builder: (context) => _VideoPlayerScreen(
+            videoId: videoId,
+            title: video.title,
+            playlist: playlist ?? [video],
+            initialIndex: initialIndex,
+          ),
         ),
       );
     } else if (video.videoUrl.isNotEmpty) {
-      // It's an uploaded video (direct URL)
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) =>
-              _UploadedVideoPlayerScreen(videoUrl: video.videoUrl, title: video.title),
+          builder: (context) => _UploadedVideoPlayerScreen(
+            videoUrl: video.videoUrl,
+            title: video.title,
+            playlist: playlist ?? [video],
+            initialIndex: initialIndex,
+          ),
         ),
       );
     } else {
@@ -1326,45 +2004,20 @@ class _VideoListItem extends StatelessWidget {
       );
     }
   }
-
-  String? _extractYouTubeId(String url) {
-    if (url.isEmpty) return null;
-    
-    // Handle youtu.be format
-    if (url.contains('youtu.be/')) {
-      return url.split('youtu.be/').last.split('?').first.split('#').first;
-    }
-    // Handle youtube.com/watch?v= format
-    if (url.contains('youtube.com/watch?v=')) {
-      return url.split('v=').last.split('&').first;
-    }
-    // Handle youtube.com/embed/ format
-    if (url.contains('youtube.com/embed/')) {
-      return url.split('embed/').last.split('?').first.split('#').first;
-    }
-    // Handle bare video ID (11 characters, alphanumeric + _ and -)
-    if (RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(url.trim())) {
-      return url.trim();
-    }
-    // If it looks like a YouTube URL but we haven't matched it yet, try to extract from the last part
-    if (url.contains('youtube')) {
-      final parts = url.split('/');
-      for (int i = parts.length - 1; i >= 0; i--) {
-        final part = parts[i].split('?').first.split('#').first;
-        if (RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(part)) {
-          return part;
-        }
-      }
-    }
-    return null;
-  }
 }
 
 class _VideoPlayerScreen extends StatefulWidget {
-  const _VideoPlayerScreen({required this.videoId, required this.title});
+  const _VideoPlayerScreen({
+    required this.videoId,
+    required this.title,
+    this.playlist = const [],
+    this.initialIndex = 0,
+  });
 
   final String videoId;
   final String title;
+  final List<TopicVideo> playlist;
+  final int initialIndex;
 
   @override
   State<_VideoPlayerScreen> createState() => _VideoPlayerScreenState();
@@ -1374,13 +2027,27 @@ class _VideoPlayerScreenState extends State<_VideoPlayerScreen> {
   late YoutubePlayerController _controller;
   bool _isPlayerReady = false;
   bool _isMuted = false;
+  late List<_PlaylistItem> _queue;
+  late int _currentIndex;
+  Duration _position = Duration.zero;
+  Duration _total = Duration.zero;
+  bool _isMini = false;
+  Offset _miniOffset = const Offset(12, 12);
+  bool _handedToGlobalPip = false;
 
   @override
   void initState() {
     super.initState();
+    _queue = _buildQueue();
+    _currentIndex = _queue.isEmpty
+        ? 0
+        : widget.initialIndex.clamp(0, _queue.length - 1);
+    final initial = _queue.isNotEmpty
+        ? _queue[_currentIndex]
+        : _PlaylistItem(youtubeId: widget.videoId, title: widget.title);
     // Initialize the controller with your video ID
     _controller = YoutubePlayerController(
-      initialVideoId: widget.videoId,
+      initialVideoId: initial.youtubeId,
       flags: const YoutubePlayerFlags(
         mute: false,
         autoPlay: true, // Set to false if you want manual start
@@ -1399,6 +2066,8 @@ class _VideoPlayerScreenState extends State<_VideoPlayerScreen> {
       if (mounted) {
         setState(() {
           _isPlayerReady = _controller.value.isReady;
+          _position = _controller.value.position;
+          _total = _controller.value.metaData.duration;
           // Note: YoutubePlayerValue doesn't have isMuted property
           // We track mute state manually in _isMuted variable
         });
@@ -1415,7 +2084,9 @@ class _VideoPlayerScreenState extends State<_VideoPlayerScreen> {
 
   @override
   void dispose() {
-    _controller.dispose();
+    if (!_handedToGlobalPip) {
+      _controller.dispose();
+    }
     // Reset orientation to portrait
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
@@ -1423,139 +2094,492 @@ class _VideoPlayerScreenState extends State<_VideoPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
+    final currentTitle = _queue.isNotEmpty ? _queue[_currentIndex].title : widget.title;
+    Widget content;
+    if (_queue.isEmpty) {
+      content = Center(child: _buildPlayer(currentTitle, aspectRatio: 16 / 9));
+    } else {
+      final tiles = <Widget>[];
+      for (int i = 0; i < _queue.length; i++) {
+        if (!_isMini && i == _currentIndex) {
+          tiles.add(_currentPlayerSection(currentTitle));
+        }
+        tiles.add(_playlistTile(i, isActive: i == _currentIndex));
+      }
+
+      content = ListView(
+        padding: const EdgeInsets.only(bottom: 24),
+        children: tiles,
+      );
+    }
+
+    return WillPopScope(
+      onWillPop: () async {
+        if (!_handedToGlobalPip) {
+          _handOffToGlobalPip(currentTitle);
+          return false;
+        }
+        return true;
+      },
+      child: Scaffold(
         backgroundColor: Colors.black,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          widget.title,
-          style: const TextStyle(color: Colors.white, fontSize: 16),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      body: Column(
-        children: [
-          // YouTube Player (takes most of the screen)
-          Expanded(
-            child: YoutubePlayerBuilder(
-              onExitFullScreen: () {
-                // Optional: Handle exit full-screen
-                SystemChrome.setPreferredOrientations([
-                  DeviceOrientation.portraitUp,
-                  DeviceOrientation.landscapeLeft,
-                  DeviceOrientation.landscapeRight,
-                ]);
-              },
-              player: YoutubePlayer(
-                controller: _controller,
-                showVideoProgressIndicator: true,
-                progressColors: const ProgressBarColors(
-                  playedColor: Colors.red,
-                  // handleAndBufferedColor: Colors.white24,
-                ),
-                topActions: [
-                  const SizedBox(width: 8.0),
-                  Expanded(
-                    child: Text(
-                      widget.title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18.0,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      _isMuted ? Icons.volume_off : Icons.volume_up,
-                      color: _isMuted ? Colors.grey[400] : Colors.white,
-                      size: 25.0,
-                    ),
-                    onPressed: () {
-                      // Toggle our local flag first for immediate UI feedback,
-                      // then call controller methods. Use setVolume as a
-                      // fallback on platforms where mute() may not work.
-                      final willMute = !_isMuted;
-                      setState(() => _isMuted = willMute);
-                      if (willMute) {
-                        try {
-                          _controller.mute();
-                          // Ensure volume is 0 as robust fallback
-                          _controller.setVolume(0);
-                        } catch (_) {
-                          // ignore failures from controller methods
-                        }
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: TranslatedText('Video muted'),
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      } else {
-                        try {
-                          _controller.unMute();
-                          // Restore volume to a reasonable level
-                          _controller.setVolume(100);
-                        } catch (_) {}
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: TranslatedText('Video unmuted'),
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.settings,
-                      color: Colors.white,
-                      size: 25.0,
-                    ),
-                    onPressed: () {
-                      // Optional: Open settings
-                    },
-                  ),
-                ],
-                onReady: () {
-                  _hideVideoProgressIndicator();
-                },
-                onEnded: (metaData) {
-                  _controller.load(widget.videoId); // Restart video on end
-                },
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => _handOffToGlobalPip(currentTitle),
+          ),
+          title: Text(
+            currentTitle,
+            style: const TextStyle(color: Colors.white, fontSize: 16),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          actions: [
+            IconButton(
+              icon: Icon(
+                _isMini ? Icons.fullscreen : Icons.picture_in_picture_alt_outlined,
+                color: Colors.white,
               ),
-              builder: (context, player) {
-                return player; // This builds the player widget
+              onPressed: () {
+                setState(() => _isMini = !_isMini);
               },
             ),
-          ),
-          // Optional: Add controls or description below the player
-          if (!_isPlayerReady)
-            const LinearProgressIndicator(
-              backgroundColor: Colors.black,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+            IconButton(
+              icon: const Icon(Icons.open_in_new, color: Colors.white),
+              onPressed: () => _handOffToGlobalPip(currentTitle),
             ),
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: TranslatedText(
-              'Video ID: ${widget.videoId}',
-              style: TextStyle(color: Colors.grey[600], fontSize: 12),
-            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Stack(
+            children: [
+              Positioned.fill(child: content),
+              if (_isMini)
+                _DraggablePipFrame(
+                  onClose: () => setState(() => _isMini = false),
+                  child: _miniCard(currentTitle),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
+  }
+
+  Widget _miniPlayerCard(String currentTitle) {
+    return Draggable(
+      feedback: _miniCard(currentTitle),
+      childWhenDragging: const SizedBox.shrink(),
+      onDragEnd: (d) => setState(() => _miniOffset = d.offset),
+      child: Transform.translate(
+        offset: _miniOffset,
+        child: _miniCard(currentTitle),
+      ),
+    );
+  }
+
+  Widget _miniCard(String currentTitle) {
+    return GestureDetector(
+      onTap: () => setState(() => _isMini = false),
+      child: Material(
+        color: Colors.transparent,
+        elevation: 8,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: 200,
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [
+              BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildPlayer(currentTitle, aspectRatio: 16 / 9),
+                Container(
+                  color: Colors.black87,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          currentTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                        padding: EdgeInsets.zero,
+                        onPressed: () => setState(() => _isMini = false),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _handOffToGlobalPip(String title) {
+    if (_handedToGlobalPip) return;
+    _handedToGlobalPip = true;
+    _PipOverlayManager.instance.showYoutube(
+      context,
+      controller: _controller,
+      queue: _queue,
+      currentIndex: _currentIndex,
+      onClose: () {
+        _controller.dispose();
+      },
+    );
+    Navigator.of(context).pop();
+  }
+
+  Widget _currentPlayerSection(String currentTitle) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPlayer(currentTitle, aspectRatio: 16 / 9),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                currentTitle,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  _metaPill(Icons.play_circle_fill, 'Playlist · ${_queue.length}'),
+                  const SizedBox(width: 8),
+                  _metaPill(Icons.screen_rotation, 'Rotate for full screen'),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const Divider(color: Colors.white12, height: 1),
+      ],
+    );
+  }
+
+  Widget _playlistTile(int index, {required bool isActive}) {
+    final item = _queue[index];
+    final progress = isActive && _total.inMilliseconds > 0
+        ? _position.inMilliseconds.clamp(0, _total.inMilliseconds) /
+            _total.inMilliseconds
+        : 0.0;
+    return GestureDetector(
+      onTap: () => _playFromIndex(index),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isActive ? Colors.white10 : Colors.white.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 26,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Center(
+                child: Text(
+                  '#${index + 1}',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(isActive ? 1 : 0.9),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  if (item.description.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        item.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  Row(
+                    children: [
+                      if (item.duration != null && item.duration!.isNotEmpty) ...[
+                        const Icon(Icons.schedule, size: 12, color: Colors.white54),
+                        const SizedBox(width: 4),
+                        Text(
+                          item.duration!,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                      if (item.isPreview) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Preview',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (isActive) ...[
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        minHeight: 4,
+                        value: progress.isFinite ? progress : 0,
+                        backgroundColor: Colors.white12,
+                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.red),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Icon(
+              isActive ? Icons.pause_circle_filled : Icons.play_circle_fill,
+              color: Colors.white,
+              size: 26,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlayer(String currentTitle, {double? aspectRatio}) {
+    final ratio = aspectRatio ?? 16 / 9;
+    return YoutubePlayerBuilder(
+      onExitFullScreen: () {
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      },
+      player: YoutubePlayer(
+        controller: _controller,
+        showVideoProgressIndicator: true,
+        progressColors: const ProgressBarColors(
+          playedColor: Colors.red,
+        ),
+        topActions: [
+          const SizedBox(width: 8.0),
+          Expanded(
+            child: Text(
+              currentTitle,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18.0,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
+          IconButton(
+            icon: Icon(
+              _isMuted ? Icons.volume_off : Icons.volume_up,
+              color: _isMuted ? Colors.grey[400] : Colors.white,
+              size: 25.0,
+            ),
+            onPressed: _toggleMute,
+          ),
+        ],
+        onReady: _hideVideoProgressIndicator,
+        onEnded: (_) => _playNext(),
+      ),
+      builder: (context, player) {
+        final content = Column(
+          children: [
+            AspectRatio(
+              aspectRatio: ratio,
+              child: player,
+            ),
+            if (!_isPlayerReady)
+              const LinearProgressIndicator(
+                backgroundColor: Colors.black,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+              ),
+          ],
+        );
+        return content;
+      },
+    );
+  }
+
+  // Use shared pill helper
+
+  void _playFromIndex(int index) {
+    if (index < 0 || index >= _queue.length) return;
+    setState(() {
+      _currentIndex = index;
+    });
+    _controller.load(_queue[index].youtubeId);
+  }
+
+  void _playNext() {
+    if (_queue.isEmpty) return;
+    final next = (_currentIndex + 1) % _queue.length;
+    _playFromIndex(next);
+  }
+
+  void _toggleMute() {
+    final willMute = !_isMuted;
+    setState(() => _isMuted = willMute);
+    if (willMute) {
+      try {
+        _controller.mute();
+        _controller.setVolume(0);
+      } catch (_) {}
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: TranslatedText('Video muted'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } else {
+      try {
+        _controller.unMute();
+        _controller.setVolume(100);
+      } catch (_) {}
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: TranslatedText('Video unmuted'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  List<_PlaylistItem> _buildQueue() {
+    final items = <_PlaylistItem>[];
+    for (final video in widget.playlist) {
+      final id = _extractYouTubeId(video.videoUrl);
+      if (id != null) {
+        items.add(_PlaylistItem(
+          youtubeId: id,
+          title: video.title,
+          duration: video.duration ??
+              (video.durationSeconds != null && video.durationSeconds! > 0
+                  ? '${(video.durationSeconds! / 60).ceil()}m'
+                  : null),
+          isPreview: video.isPreview,
+          description: video.description,
+        ));
+      }
+    }
+
+    if (items.isEmpty) {
+      items.add(_PlaylistItem(
+        youtubeId: widget.videoId,
+        title: widget.title,
+      ));
+    }
+    return items;
   }
 
   void _hideVideoProgressIndicator() {
     // Optional: Hide progress after a delay
   }
+}
+
+class _PlaylistItem {
+  _PlaylistItem({
+    required this.youtubeId,
+    required this.title,
+    this.duration,
+    this.isPreview = false,
+    this.description = '',
+  });
+
+  final String youtubeId;
+  final String title;
+  final String? duration;
+  final bool isPreview;
+  final String description;
+}
+
+String? _extractYouTubeId(String url) {
+  if (url.isEmpty) return null;
+
+  if (url.contains('youtu.be/')) {
+    return url.split('youtu.be/').last.split('?').first.split('#').first;
+  }
+  if (url.contains('youtube.com/watch?v=')) {
+    return url.split('v=').last.split('&').first;
+  }
+  if (url.contains('youtube.com/embed/')) {
+    return url.split('embed/').last.split('?').first.split('#').first;
+  }
+  if (RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(url.trim())) {
+    return url.trim();
+  }
+  if (url.contains('youtube')) {
+    final parts = url.split('/');
+    for (int i = parts.length - 1; i >= 0; i--) {
+      final part = parts[i].split('?').first.split('#').first;
+      if (RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(part)) {
+        return part;
+      }
+    }
+  }
+  return null;
 }
 
 class _DescriptionTab extends StatelessWidget {
