@@ -1,37 +1,113 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'screens/splash_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'config/api_config.dart';
+import 'services/fcm_service.dart';
+
+// Flutter Local Notifications plugin instance
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+// Android notification channel
+const AndroidNotificationChannel channel = AndroidNotificationChannel(
+  'high_importance_channel', // id - must match AndroidManifest
+  'High Importance Notifications', // title
+  description: 'This channel is used for important notifications.',
+  importance: Importance.high,
+  playSound: true,
+);
+
+// Handle background notifications
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  print('📬 Background notification received:');
+  print('   Title: ${message.notification?.title}');
+  print('   Body: ${message.notification?.body}');
+  print('   Data: ${message.data}');
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock app to portrait orientation only
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-  ]);
-
-  // Initialize Firebase and log FCM token
-  await Firebase.initializeApp();
+  // Initialize Firebase (with error handling)
   try {
-    final status = await Permission.notification.status;
-    PermissionStatus permissionResult = status;
+    await Firebase.initializeApp();
+    print('✅ Firebase initialized successfully');
+  } catch (e) {
+    print('⚠️ Firebase initialization failed: $e');
+    // Continue app execution even if Firebase fails
+  }
 
-    if (status.isDenied) {
-      permissionResult = await Permission.notification.request();
+  // Initialize Flutter Local Notifications
+  try {
+    // Create Android notification channel
+    if (Platform.isAndroid) {
+      await flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+      print('✅ Android notification channel created');
     }
 
-    if (permissionResult.isGranted) {
-      final messaging = FirebaseMessaging.instance;
+    // Initialize local notifications
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const DarwinInitializationSettings initializationSettingsIOS =
+        DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+    const InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+      iOS: initializationSettingsIOS,
+    );
+    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+    print('✅ Flutter Local Notifications initialized');
+  } catch (e) {
+    print('⚠️ Failed to initialize local notifications: $e');
+  }
+
+  // Set up background notification handler
+  try {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    print('✅ Background notification handler registered');
+  } catch (e) {
+    print('⚠️ Failed to register background handler: $e');
+  }
+
+  // Request notification permissions and log FCM token
+  try {
+    final messaging = FirebaseMessaging.instance;
+    final settings = await messaging.requestPermission(
+      alert: true,
+      announcement: false,
+      badge: true,
+      carPlay: false,
+      criticalAlert: false,
+      provisional: false,
+      sound: true,
+    );
+    print('📱 Notification permission status: ${settings.authorizationStatus}');
+
+    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
       final token = await messaging.getToken();
       print('📲 FCM TOKEN: ${token ?? 'unavailable'}');
-    } else if (permissionResult.isPermanentlyDenied) {
-      print('⚠️ Notifications permanently denied. Enable them in system settings.');
+
+      // Set foreground notification presentation options
+      await messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      print('✅ Foreground notification options set');
     } else {
       print('⚠️ Notifications denied. Skipping FCM token retrieval.');
     }
@@ -39,18 +115,98 @@ Future<void> main() async {
     print('⚠️ Failed to fetch FCM token: $e');
   }
 
+  // Lock app to portrait orientation only
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
+
   // Log API configuration at startup
   ApiConfig.logConfiguration();
-  
+
   // Show detailed configuration for debugging
   print('🎯 CURRENT API BASE URL: ${ApiConfig.baseUrl}');
   print('🌍 ENVIRONMENT: ${ApiConfig.environmentName}');
-  
+
   runApp(const ThinkCyberApp());
 }
 
-class ThinkCyberApp extends StatelessWidget {
+class ThinkCyberApp extends StatefulWidget {
   const ThinkCyberApp({super.key});
+
+  @override
+  State<ThinkCyberApp> createState() => _ThinkCyberAppState();
+}
+
+class _ThinkCyberAppState extends State<ThinkCyberApp> {
+  final _fcmService = FcmService();
+
+  @override
+  void initState() {
+    super.initState();
+    _setupForegroundNotificationHandler();
+    _registerFcmToken();
+  }
+
+  /// Register FCM token with server and set up refresh listener
+  Future<void> _registerFcmToken() async {
+    // Set up token refresh listener
+    _fcmService.setupTokenRefreshListener();
+    
+    // Register current token with server (will only work if user is logged in)
+    await _fcmService.registerTokenWithServer();
+  }
+
+  void _setupForegroundNotificationHandler() {
+    // Handle foreground notifications - show local notification
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('═══════════════════════════════════════════');
+      print('📨 FOREGROUND NOTIFICATION RECEIVED:');
+      print('   Title: ${message.notification?.title}');
+      print('   Body: ${message.notification?.body}');
+      print('   Data: ${message.data}');
+      print('═══════════════════════════════════════════');
+
+      final notification = message.notification;
+
+      // Show local notification when app is in foreground
+      if (notification != null) {
+        flutterLocalNotificationsPlugin.show(
+          notification.hashCode,
+          notification.title,
+          notification.body,
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              channel.id,
+              channel.name,
+              channelDescription: channel.description,
+              importance: Importance.high,
+              priority: Priority.high,
+              icon: '@mipmap/ic_launcher',
+              playSound: true,
+            ),
+            iOS: const DarwinNotificationDetails(
+              presentAlert: true,
+              presentBadge: true,
+              presentSound: true,
+            ),
+          ),
+          payload: message.data.toString(),
+        );
+        print('✅ Local notification displayed');
+      }
+    });
+
+    // Handle notification taps (when app is in background and user taps)
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      print('═══════════════════════════════════════════');
+      print('🎯 NOTIFICATION TAPPED:');
+      print('   Title: ${message.notification?.title}');
+      print('   Body: ${message.notification?.body}');
+      print('   Data: ${message.data}');
+      print('═══════════════════════════════════════════');
+      // Handle navigation based on notification data
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -124,6 +124,15 @@ class SessionService {
     return prefs.getString(_keyEmail);
   }
 
+  /// Get current user ID
+  static Future<int?> getUserId() async {
+    if (!await isAuthenticated()) return null;
+    
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt(_keyUserId);
+    return userId != 0 ? userId : null;
+  }
+
   /// Refresh session timestamp (call this when user is active)
   static Future<void> refreshSession() async {
     if (await isAuthenticated()) {

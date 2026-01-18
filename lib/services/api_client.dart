@@ -274,16 +274,33 @@ class ThinkCyberApi {
     required int userId,
     required int topicId,
     required String email,
+    String? fcmToken,
   }) async {
+    final payload = {
+      'userId': userId,
+      'topicId': topicId,
+      'email': email,
+      'currency': 'INR',
+      if (fcmToken != null) 'fcmToken': fcmToken,
+    };
+
+    _log('═══════════════════════════════════════════');
+    _log('📤 enrollFreeCourse REQUEST');
+    _log('   Endpoint: ${ApiConfig.enrollmentsEnroll}');
+    _log('   User ID: $userId');
+    _log('   Topic ID: $topicId');
+    _log('   FCM Token: ${fcmToken != null ? '✅ Included' : '❌ Not included'}');
+    _log('═══════════════════════════════════════════');
+
     final json = await _postJson(
       path: ApiConfig.enrollmentsEnroll,
-      payload: {
-        'userId': userId,
-        'topicId': topicId,
-        'email': email,
-        'currency': 'INR',
-      },
+      payload: payload,
     );
+
+    _log('═══════════════════════════════════════════');
+    _log('📥 enrollFreeCourse RESPONSE');
+    _log('   $json');
+    _log('═══════════════════════════════════════════');
 
     return GenericResponse.fromJson(json);
   }
@@ -456,6 +473,38 @@ class ThinkCyberApi {
     );
   }
 
+  Future<Map<String, dynamic>> _putJson({
+    required String path,
+    required Map<String, dynamic> payload,
+  }) async {
+    final fullUrl = ApiConfig.buildUrl(path);
+    final uri = Uri.parse(fullUrl);
+
+    _log('📤 PUT Request → $path');
+    _log('🔗 Full URL → $fullUrl');
+    _log('📦 Payload → ${jsonEncode(payload)}');
+
+    final response = await _client.put(
+      uri,
+      headers: ApiConfig.defaultHeaders,
+      body: jsonEncode(payload),
+    );
+
+    _log(
+      '📥 Response ← ${response.statusCode} $path ${_truncateResponse(response.body)}',
+      isError: response.statusCode >= 400,
+    );
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+
+    throw ApiException(
+      message: _extractErrorMessage(response.body),
+      statusCode: response.statusCode,
+    );
+  }
+
   Future<Map<String, dynamic>> _getJson(String path) async {
     final fullUrl = ApiConfig.buildUrl(path);
     final uri = Uri.parse(fullUrl);
@@ -542,6 +591,49 @@ class ThinkCyberApi {
     final endpoint = '/categories';
     final json = await _getJson(endpoint);
     return CategoriesResponse.fromJson(json);
+  }
+
+  /// Fetch notifications history for a user
+  Future<NotificationsHistoryResponse> fetchNotificationsHistory(int userId) async {
+    final json = await _getJson(ApiConfig.notificationsHistoryWithUserId(userId));
+    return NotificationsHistoryResponse.fromJson(json);
+  }
+
+  /// Mark a single notification as read
+  Future<GenericResponse> markNotificationAsRead(int notificationId) async {
+    final json = await _putJson(
+      path: ApiConfig.notificationsMarkReadWithId(notificationId),
+      payload: {},
+    );
+    return GenericResponse.fromJson(json);
+  }
+
+  /// Mark all notifications as read for a user
+  Future<GenericResponse> markAllNotificationsAsRead(int userId) async {
+    final json = await _putJson(
+      path: ApiConfig.notificationsMarkAllReadWithUserId(userId),
+      payload: {},
+    );
+    return GenericResponse.fromJson(json);
+  }
+
+  /// Update FCM token for push notifications
+  Future<GenericResponse> updateFcmToken({
+    required int userId,
+    required String fcmToken,
+    String? deviceId,
+    String? deviceName,
+  }) async {
+    final json = await _postJson(
+      path: ApiConfig.notificationsUpdateFcmToken,
+      payload: {
+        'userId': userId,
+        'fcmToken': fcmToken,
+        if (deviceId != null) 'deviceId': deviceId,
+        if (deviceName != null) 'deviceName': deviceName,
+      },
+    );
+    return GenericResponse.fromJson(json);
   }
 
   void dispose() {
@@ -1601,6 +1693,102 @@ class AppVersionInfo {
       latestVersionName: json['latestVersionName'] as String?,
       iosStoreUrl: json['iosStoreUrl'] as String?,
       androidStoreUrl: json['androidStoreUrl'] as String?,
+    );
+  }
+}
+
+/// Response class for notifications history API
+class NotificationsHistoryResponse {
+  NotificationsHistoryResponse({
+    required this.success,
+    required this.data,
+    this.total,
+    this.unreadCount,
+    this.limit,
+    this.offset,
+  });
+
+  final bool success;
+  final List<NotificationData> data;
+  final int? total;
+  final int? unreadCount;
+  final int? limit;
+  final int? offset;
+
+  factory NotificationsHistoryResponse.fromJson(Map<String, dynamic> json) {
+    final dataList = json['data'] as List<dynamic>? ?? [];
+    return NotificationsHistoryResponse(
+      success: json['success'] as bool? ?? false,
+      data: dataList
+          .map((item) => NotificationData.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      total: json['total'] as int?,
+      unreadCount: json['unreadCount'] as int?,
+      limit: json['limit'] as int?,
+      offset: json['offset'] as int?,
+    );
+  }
+}
+
+/// Data class for a single notification
+class NotificationData {
+  NotificationData({
+    required this.id,
+    required this.title,
+    required this.message,
+    required this.type,
+    required this.isRead,
+    required this.createdAt,
+    this.icon,
+    this.status,
+    this.data,
+  });
+
+  final int id;
+  final String title;
+  final String message;
+  final String type;
+  final bool isRead;
+  final String createdAt;
+  final String? icon;
+  final String? status;
+  final Map<String, dynamic>? data;
+
+  factory NotificationData.fromJson(Map<String, dynamic> json) {
+    return NotificationData(
+      id: json['id'] as int? ?? 0,
+      title: json['title'] as String? ?? '',
+      message: json['message'] as String? ?? '',
+      type: json['type'] as String? ?? 'info',
+      isRead: json['isRead'] as bool? ?? false,
+      createdAt: json['createdAt'] as String? ?? '',
+      icon: json['icon'] as String?,
+      status: json['status'] as String?,
+      data: json['data'] as Map<String, dynamic>?,
+    );
+  }
+
+  NotificationData copyWith({
+    int? id,
+    String? title,
+    String? message,
+    String? type,
+    bool? isRead,
+    String? createdAt,
+    String? icon,
+    String? status,
+    Map<String, dynamic>? data,
+  }) {
+    return NotificationData(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      message: message ?? this.message,
+      type: type ?? this.type,
+      isRead: isRead ?? this.isRead,
+      createdAt: createdAt ?? this.createdAt,
+      icon: icon ?? this.icon,
+      status: status ?? this.status,
+      data: data ?? this.data,
     );
   }
 }

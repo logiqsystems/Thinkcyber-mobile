@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../config/razorpay_config.dart';
 import '../services/api_client.dart';
 import '../services/cart_service.dart';
 import '../widgets/translated_text.dart';
 import '../widgets/topic_visuals.dart';
+import '../widgets/custom_snackbar.dart';
 import 'topic_detail_screen.dart';
 
 class CartScreen extends StatefulWidget {
@@ -126,7 +128,11 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
 
   void _handlePaymentError(PaymentFailureResponse response) {
     debugPrint('❌ Payment Error: ${response.message}');
-    _showSnackBar('Payment failed: ${response.message}', isError: true);
+    final message = response.message;
+    final errorMessage = (message == null || message.isEmpty || message == 'undefined')
+        ? 'Payment was cancelled or could not be completed'
+        : message;
+    CustomSnackbar.showError(context, errorMessage);
     setState(() => _isLoading = false);
   }
 
@@ -207,12 +213,22 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
       final freeCourses = _cartService.items.where((item) => item.isFree || item.price == 0).toList();
       final paidCourses = _cartService.items.where((item) => !item.isFree && item.price > 0).toList();
 
+      // Get FCM token for notifications
+      String? fcmToken;
+      try {
+        fcmToken = await FirebaseMessaging.instance.getToken();
+        debugPrint('📲 FCM Token for cart enrollment: ${fcmToken != null ? '✅ Obtained' : '❌ NULL'}');
+      } catch (e) {
+        debugPrint('⚠️ Failed to get FCM token: $e');
+      }
+
       for (final item in freeCourses) {
         try {
           await _api.enrollFreeCourse(
             userId: _userId!,
             topicId: item.id,
             email: _userEmail!,
+            fcmToken: fcmToken,
           );
           debugPrint('✅ Enrolled in free course: ${item.title}');
         } catch (e) {

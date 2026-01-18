@@ -10,11 +10,13 @@ import '../services/cart_service.dart';
 import '../services/localization_service.dart';
 import '../services/translation_service.dart';
 import '../services/plan_classifier.dart';
+import '../services/fcm_service.dart';
 import '../config/razorpay_config.dart';
 import '../widgets/topic_visuals.dart';
 import '../widgets/translated_text.dart';
 import '../widgets/lottie_loader.dart';
 import '../widgets/plan_display_widget.dart';
+import '../widgets/custom_snackbar.dart';
 import 'topic_detail_screen.dart';
 import 'bundle_topics_detail_screen.dart';
 import 'cart_screen.dart';
@@ -526,7 +528,7 @@ class _DashboardState extends State<Dashboard> {
     }
   }
 
-  void _navigateToTopic(CourseTopic topic) {
+  void _navigateToTopic(CourseTopic topic) async {
     // Clear search when navigating
     _searchController.clear();
     _searchFocusNode.unfocus();
@@ -535,12 +537,14 @@ class _DashboardState extends State<Dashboard> {
       _searchQuery = '';
       _searchResults = [];
     });
-    
-    Navigator.of(context).push(
+    final result = await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => TopicDetailScreen(topic: topic),
       ),
     );
+    if (result == true) {
+      _hydrate();
+    }
   }
 
   List<CourseTopic> get _filteredTopics {
@@ -1448,6 +1452,8 @@ class _DashboardState extends State<Dashboard> {
     
     final planType = _selectedCategory!.planType;
     final includeFutureTopics = planType == 'BUNDLE'; // Only BUNDLE includes future topics
+    // Calculate actual topic count from loaded topics (same as main card)
+    final topicsCount = _topics.where((t) => t.categoryName == _selectedCategory!.name).length;
     
     showDialog(
       context: context,
@@ -1481,8 +1487,8 @@ class _DashboardState extends State<Dashboard> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: TranslatedText(
-                    'All ${_selectedCategory!.topicsCount} topics in this category',
+                  child: Text(
+                    'All $topicsCount topics in this category',
                     style: const TextStyle(
                       fontSize: 13,
                       color: Color(0xFF6B7280),
@@ -1680,6 +1686,9 @@ class _DashboardState extends State<Dashboard> {
           _purchasedBundleCategoryIds.add(categoryId);
         });
         
+        // Re-register FCM token to ensure server has latest token for notifications
+        FcmService().registerTokenWithServer();
+        
         // Refresh data to reflect new enrollments
         _loadUserBundles();
         _hydrate();
@@ -1705,9 +1714,11 @@ class _DashboardState extends State<Dashboard> {
   
   void _handleBundlePaymentError(PaymentFailureResponse response) {
     debugPrint('❌ Razorpay | Bundle Payment Error - ${response.code}: ${response.message}');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Payment failed: ${response.message ?? 'Cancelled'}')),
-    );
+    final message = response.message;
+    final errorMessage = (message == null || message.isEmpty || message == 'undefined')
+        ? 'Payment was cancelled or could not be completed'
+        : message;
+    CustomSnackbar.showError(context, errorMessage);
     setState(() => _processingBundlePurchase = false);
   }
   
@@ -1740,12 +1751,6 @@ class _DashboardState extends State<Dashboard> {
     // Determine plan type for the current category
     final planType = _selectedCategory?.planType ?? 'INDIVIDUAL';
     
-    // Only show "Free" tag for FREE plan type, never for BUNDLE or FLEXIBLE
-    final showFreeTag = isFree && planType == 'FREE';
-    
-    // For BUNDLE/FLEXIBLE, don't show price tags either (it's part of bundle)
-    final showPriceTag = planType == 'INDIVIDUAL' || planType == 'FREE';
-    
     // Check if user has access via bundle purchase or individual enrollment
     final hasBundleAccess = _purchasedBundleCategoryIds.contains(
       _categories.firstWhere(
@@ -1754,6 +1759,16 @@ class _DashboardState extends State<Dashboard> {
       ).id
     );
     final isEnrolled = topic.isEnrolled || hasBundleAccess;
+    
+    // Display logic based on plan type:
+    // FREE: show "Free" tag for free topics
+    // BUNDLE: show "Bundle Only" - no individual purchase
+    // FLEXIBLE: show individual price - can buy individually or via bundle
+    // INDIVIDUAL: show individual price
+    
+    final bool showFreeTag = (planType == 'FREE' && isFree) && !isEnrolled;
+    final bool showPriceTag = ((planType == 'INDIVIDUAL' || planType == 'FLEXIBLE') && !isFree) && !isEnrolled;
+    final bool showBundleOnlyTag = (planType == 'BUNDLE') && !isEnrolled;
     
     return GestureDetector(
       onTap: () => _navigateToTopic(topic),
@@ -1790,49 +1805,67 @@ class _DashboardState extends State<Dashboard> {
                       width: double.infinity,
                       height: double.infinity,
                     ),
-                    // Only show tags for INDIVIDUAL or FREE plan types
-                    if (showPriceTag) ...[
-                      if (showFreeTag)
-                        Positioned(
-                          top: 8,
-                          right: 8,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF10B981),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const TranslatedText(
-                              'Free',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
+                    // Show appropriate tags based on plan type and enrollment status
+                    if (showFreeTag)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                        )
-                      else if (!isFree && planType == 'INDIVIDUAL')
-                        Positioned(
-                          top: 8,
-                          right: 8,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF4F46E5),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: TranslatedText(
-                              '₹${topic.price.toStringAsFixed(0)}',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
+                          child: const TranslatedText(
+                            'Free',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
                             ),
                           ),
                         ),
-                    ],
+                      )
+                    else if (showPriceTag)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF4F46E5),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: TranslatedText(
+                            '₹${topic.price.toStringAsFixed(0)}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      )
+                    else if (showBundleOnlyTag)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFF6B6B),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const TranslatedText(
+                            'Bundle Purchase Only',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -2252,52 +2285,52 @@ class _DashboardState extends State<Dashboard> {
                     ),
                     const SizedBox(width: 10),
                     
-                    // Notification Icon with badge - Hidden for now
-                    // GestureDetector(
-                    //   onTap: () {
-                    //     Navigator.of(context).push(
-                    //       MaterialPageRoute(
-                    //         builder: (context) => const NotificationScreen(),
-                    //       ),
-                    //     );
-                    //   },
-                    //   child: Stack(
-                    //     children: [
-                    //       Container(
-                    //         padding: const EdgeInsets.all(10),
-                    //         decoration: BoxDecoration(
-                    //           color: Colors.white.withOpacity(0.25),
-                    //           borderRadius: BorderRadius.circular(12),
-                    //           border: Border.all(
-                    //             color: Colors.white.withOpacity(0.3),
-                    //             width: 1,
-                    //           ),
-                    //         ),
-                    //         child: const Icon(
-                    //           Icons.notifications_outlined,
-                    //           color: Colors.white,
-                    //           size: 20,
-                    //         ),
-                    //       ),
-                    //       Positioned(
-                    //         top: 8,
-                    //         right: 8,
-                    //         child: Container(
-                    //           width: 8,
-                    //           height: 8,
-                    //           decoration: BoxDecoration(
-                    //             color: const Color(0xFFFF4444),
-                    //             shape: BoxShape.circle,
-                    //             border: Border.all(
-                    //               color: Colors.white,
-                    //               width: 1.5,
-                    //             ),
-                    //           ),
-                    //         ),
-                    //       ),
-                    //     ],
-                    //   ),
-                    // ),
+                    // Notification Icon with badge
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const NotificationScreen(),
+                          ),
+                        );
+                      },
+                      child: Stack(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.25),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.notifications_outlined,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF4444),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -3371,12 +3404,13 @@ class _PopularCourseCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: () async {
-        await Navigator.of(context).push(
+        final result = await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => TopicDetailScreen(topic: topic)),
         );
-        // Refresh dashboard when returning from detail screen
-        final state = context.findAncestorStateOfType<_DashboardState>();
-        state?._hydrate();
+        if (result == true) {
+          final state = context.findAncestorStateOfType<_DashboardState>();
+          state?._hydrate();
+        }
       },
       child: Container(
         width: width ?? 170,

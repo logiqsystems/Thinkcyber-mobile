@@ -712,14 +712,25 @@ class _AllCoursesScreenState extends State<AllCoursesScreen>
     e.price == 0 && e.categoryName != null && e.categoryName!.isNotEmpty
     ).toList();
 
+    // Get all category IDs that are already in paid or flexible bundles
+    final paidAndFlexibleCategoryIds = <int>{
+      ...paidBundleEnrollments.map((b) => b.categoryId).whereType<int>(),
+      ...flexibleBundleEnrollments.map((b) => b.categoryId).whereType<int>(),
+    };
+
     final Map<String, List<CourseTopic>> freeByCategory = {};
     for (final e in freeEnrollmentsWithCategory) {
+      // Skip if this category is already in paid or flexible bundles
+      if (paidAndFlexibleCategoryIds.contains(e.categoryId)) continue;
       final cat = e.categoryName ?? 'General';
       freeByCategory.putIfAbsent(cat, () => []).add(e);
     }
 
     for (final entry in freeByCategory.entries) {
       final firstTopic = entry.value.first;
+      // Skip if this category is already in paid or flexible bundles
+      if (paidAndFlexibleCategoryIds.contains(firstTopic.categoryId)) continue;
+      
       final virtualFreeBundle = UserBundle(
         id: -1,
         userId: _userId ?? 0,
@@ -1444,7 +1455,7 @@ class _EnhancedCourseCard extends StatelessWidget {
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1454,15 +1465,15 @@ class _EnhancedCourseCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: _textColor,
-                          fontSize: 14,
+                          fontSize: 13,
                           fontWeight: FontWeight.w800,
-                          height: 1.25,
+                          height: 1.2,
                           letterSpacing: -0.3,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                         decoration: BoxDecoration(
                           color: _accentColor.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(6),
@@ -1473,76 +1484,62 @@ class _EnhancedCourseCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: _accentColor,
-                            fontSize: 10,
+                            fontSize: 9,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.3,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: TranslatedText(
-                          _truncateDescription(
-                            course.description.isNotEmpty
-                                ? course.description
-                                : 'Learn ${course.categoryName.toLowerCase()} fundamentals',
-                            80,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: _mutedColor.withOpacity(0.9),
-                            fontSize: 11,
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
+                      const Spacer(),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  _accentColor.withOpacity(0.15),
-                                  _accentColor.withOpacity(0.08),
-                                ],
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    _accentColor.withOpacity(0.15),
+                                    _accentColor.withOpacity(0.08),
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: TranslatedText(
-                              course.difficulty.toUpperCase(),
-                              style: TextStyle(
-                                color: _accentColor,
-                                fontSize: 9,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.5,
+                              child: TranslatedText(
+                                course.difficulty.toUpperCase(),
+                                style: TextStyle(
+                                  color: _accentColor,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.5,
+                                ),
                               ),
                             ),
                           ),
+                          const SizedBox(width: 4),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                             decoration: BoxDecoration(
                               color: _mutedColor.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
                                   Icons.schedule_outlined,
-                                  size: 11,
+                                  size: 10,
                                   color: _mutedColor,
                                 ),
-                                const SizedBox(width: 4),
+                                const SizedBox(width: 3),
                                 TranslatedText(
                                   course.durationMinutes > 0
                                       ? '${course.durationMinutes}m'
                                       : 'Self',
                                   style: TextStyle(
                                     color: _mutedColor,
-                                    fontSize: 10,
+                                    fontSize: 9,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),

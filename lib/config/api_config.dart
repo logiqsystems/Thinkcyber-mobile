@@ -11,32 +11,24 @@ class ApiConfig {
   
   /// Current active environment
   /// Change this to switch between different API environments
-  static const ApiEnvironment currentEnvironment = ApiEnvironment.development;
+  static const ApiEnvironment currentEnvironment = ApiEnvironment.production;
   
   // ==================== ENVIRONMENT DEFINITIONS ====================
   
   /// Available API environments
   static const Map<ApiEnvironment, EnvironmentConfig> _environments = {
     ApiEnvironment.development: EnvironmentConfig(
-      name: 'Development',
-      baseUrl: 'https://api.thinkcyber.info/api',
+      name: 'Development', 
+      baseUrl: 'http://10.20.0.9:8082/api',
       timeout: Duration(seconds: 30),
       enableLogging: true,
-    ),
-    
-    ApiEnvironment.staging: EnvironmentConfig(
-      name: 'Staging',
-      baseUrl: 'https://staging.thinkcyber.com/api',
-      timeout: Duration(seconds: 25),
-      enableLogging: true,
-    ),
-    
+    ), 
     ApiEnvironment.production: EnvironmentConfig(
       name: 'Production',
-      baseUrl: 'https://api.thinkcyber.com/v1',
+      baseUrl: 'https://api.thinkcyber.info/api',
       timeout: Duration(seconds: 20),
-      enableLogging: false,
-    ),
+      enableLogging: true,
+    ), 
   };
   
   // ==================== CURRENT CONFIGURATION ====================
@@ -124,7 +116,22 @@ class ApiConfig {
   static const String analyticsTrackEvent = '/analytics/track';
   static const String analyticsUserProgress = '/analytics/progress';
   
-  // ==================== THIRD-PARTY API CONFIGURATIONS ====================
+  /// Notification endpoints
+  static const String notificationsHistory = '/notifications/history';
+  static const String notificationsMarkRead = '/notifications/mark-read';
+  static const String notificationsMarkAllRead = '/notifications/mark-all-read';
+  static const String notificationsUpdateFcmToken = '/notifications/update-fcm-token';
+
+  /// Get notifications history with userId
+  static String notificationsHistoryWithUserId(int userId) => '$notificationsHistory/$userId';
+
+  /// Mark single notification as read
+  static String notificationsMarkReadWithId(int notificationId) => '$notificationsMarkRead/$notificationId';
+
+  /// Mark all notifications as read for a user
+  static String notificationsMarkAllReadWithUserId(int userId) => '$notificationsMarkAllRead/$userId';
+  
+  // ==================== THIRD-PARTY API CONFIGURATIONS ======================================
   
   /// Google Translate API configuration
   static const String googleTranslateBaseUrl = 'https://translate.googleapis.com';

@@ -6,6 +6,7 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../config/razorpay_config.dart';
 import '../services/api_client.dart';
@@ -14,6 +15,7 @@ import '../services/wishlist_store.dart';
 import '../services/cart_service.dart';
 import '../widgets/topic_visuals.dart';
 import '../widgets/translated_text.dart';
+import '../widgets/custom_snackbar.dart';
 import 'cart_screen.dart';
 
 const _primaryRed = Color( 0xFF2E7DFF);
@@ -288,6 +290,7 @@ class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> 
   bool _isMini = false;
   Offset _miniOffset = const Offset(12, 12);
   bool _handedToGlobalPip = false;
+  bool _isVideoPlaying = false; // Track if video has started playing
 
   @override
   void initState() {
@@ -301,7 +304,8 @@ class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> 
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent('Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36');
 
-    _loadVideo(_queue[_currentIndex].videoUrl);
+    // Don't auto-play - show thumbnail first
+    // _loadVideo(_queue[_currentIndex].videoUrl);
   }
 
   @override
@@ -312,11 +316,17 @@ class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> 
         ? screenWidth * 9 / 16
         : MediaQuery.of(context).size.height;
 
+    final currentVideo = _queue[_currentIndex];
+    final thumbnailUrl = currentVideo.thumbnailUrl;
+
+    // Show thumbnail with play button overlay before video starts
     final player = Container(
       color: Colors.black,
       height: playerHeight,
       width: double.infinity,
-      child: WebViewWidget(controller: _webViewController),
+      child: _isVideoPlaying
+          ? WebViewWidget(controller: _webViewController)
+          : _buildThumbnailWithPlayButton(thumbnailUrl, currentVideo.title, playerHeight),
     );
 
     Widget portraitBody = SingleChildScrollView(
@@ -468,6 +478,113 @@ class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> 
     Navigator.of(context).pop();
   }
 
+  /// Build thumbnail overlay with centered play button
+  Widget _buildThumbnailWithPlayButton(String? thumbnailUrl, String title, double height) {
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _isVideoPlaying = true;
+        });
+        _loadVideo(_queue[_currentIndex].videoUrl);
+      },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Thumbnail or gradient background
+          if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+            Image.network(
+              thumbnailUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _buildGradientPlaceholder(title),
+            )
+          else
+            _buildGradientPlaceholder(title),
+          // Dark overlay
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.3),
+                  Colors.black.withOpacity(0.5),
+                ],
+              ),
+            ),
+          ),
+          // Play button
+          Center(
+            child: Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.95),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 20,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.play_arrow_rounded,
+                color: Color(0xFF1E3A5F),
+                size: 42,
+              ),
+            ),
+          ),
+          // Title at bottom
+          Positioned(
+            bottom: 16,
+            left: 16,
+            right: 16,
+            child: Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                shadows: [
+                  Shadow(
+                    color: Colors.black54,
+                    blurRadius: 8,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGradientPlaceholder(String title) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF1E3A5F),
+            Color(0xFF2D5A87),
+            Color(0xFF1E3A5F),
+          ],
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.videocam_rounded,
+          size: 64,
+          color: Colors.white.withOpacity(0.3),
+        ),
+      ),
+    );
+  }
+
   void _loadVideo(String url) {
     final htmlContent = '''
     <!DOCTYPE html>
@@ -542,14 +659,40 @@ class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> 
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-          child: Text(
-            'Playlist',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.9),
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E88E5).withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.playlist_play_rounded, color: Color(0xFF1E88E5), size: 18),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Playlist',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.95),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${_queue.length} videos',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.5),
+                  fontSize: 12,
+                ),
+              ),
+            ],
           ),
         ),
         ListView.separated(
@@ -557,79 +700,171 @@ class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> 
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           itemCount: _queue.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (context, index) {
             final item = _queue[index];
             final isActive = index == _currentIndex;
+            final thumbnailUrl = item.thumbnailUrl;
+            
             return GestureDetector(
               onTap: () {
                 setState(() {
                   _currentIndex = index;
+                  _isVideoPlaying = true;
                 });
                 _loadVideo(item.videoUrl);
               },
               child: Container(
-                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: isActive ? Colors.white10 : Colors.white.withOpacity(0.02),
-                  borderRadius: BorderRadius.circular(12),
+                  color: isActive 
+                      ? const Color(0xFF1E88E5).withOpacity(0.15)
+                      : Colors.white.withOpacity(0.04),
+                  borderRadius: BorderRadius.circular(14),
+                  border: isActive 
+                      ? Border.all(color: const Color(0xFF1E88E5).withOpacity(0.4), width: 1.5)
+                      : null,
                 ),
                 child: Row(
                   children: [
-                    Container(
-                      width: 46,
-                      height: 26,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(6),
+                    // Thumbnail
+                    ClipRRect(
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(14),
+                        bottomLeft: Radius.circular(14),
                       ),
-                      child: Center(
-                        child: Text(
-                          '#${index + 1}',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.9),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Stack(
                         children: [
-                          Text(
-                            item.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(isActive ? 1 : 0.9),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          SizedBox(
+                            width: 120,
+                            height: 70,
+                            child: thumbnailUrl != null && thumbnailUrl.isNotEmpty
+                                ? Image.network(
+                                    thumbnailUrl,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => _buildPlaylistThumbnailPlaceholder(index),
+                                  )
+                                : _buildPlaylistThumbnailPlaceholder(index),
                           ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              const Icon(Icons.schedule, size: 12, color: Colors.white54),
-                              const SizedBox(width: 4),
-                              Text(
-                                item.duration ?? '',
-                                style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 12,
+                          // Duration badge
+                          if (item.duration != null && item.duration!.isNotEmpty)
+                            Positioned(
+                              bottom: 4,
+                              right: 4,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.75),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  item.duration!,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                          // Play overlay for active item
+                          if (isActive)
+                            Positioned.fill(
+                              child: Container(
+                                color: Colors.black.withOpacity(0.4),
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.play_arrow_rounded,
+                                    color: Colors.white,
+                                    size: 32,
+                                  ),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
-                    Icon(
-                      isActive ? Icons.pause_circle_filled : Icons.play_circle_fill,
-                      color: Colors.white,
-                      size: 26,
+                    // Content
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: isActive 
+                                        ? const Color(0xFF1E88E5)
+                                        : Colors.white.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '${index + 1}',
+                                    style: TextStyle(
+                                      color: isActive ? Colors.white : Colors.white70,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                if (isActive) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF22C55E).withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'NOW PLAYING',
+                                      style: TextStyle(
+                                        color: Color(0xFF22C55E),
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              item.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isActive ? Colors.white : Colors.white.withOpacity(0.85),
+                                fontSize: 13,
+                                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                                height: 1.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // Play/Pause icon
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: isActive 
+                              ? const Color(0xFF1E88E5)
+                              : Colors.white.withOpacity(0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          isActive ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -637,7 +872,46 @@ class _UploadedVideoPlayerScreenState extends State<_UploadedVideoPlayerScreen> 
             );
           },
         ),
+        const SizedBox(height: 16),
       ],
+    );
+  }
+
+  Widget _buildPlaylistThumbnailPlaceholder(int index) {
+    return Container(
+      width: 120,
+      height: 70,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF1E3A5F).withOpacity(0.8),
+            const Color(0xFF2D5A87).withOpacity(0.8),
+          ],
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.videocam_rounded,
+              color: Colors.white.withOpacity(0.4),
+              size: 24,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Video ${index + 1}',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.5),
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -666,6 +940,8 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
   String? _currentOrderId;
   bool _processingCheckout = false;
   bool _isWishlisted = false;
+  bool _hasBundleAccess = false; // Track if user has bundle access for this topic's category
+  String? _categoryPlanType; // Track the plan type of this topic's category (null until loaded)
 
   @override
   void initState() {
@@ -681,7 +957,77 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
 
   Future<void> _initialize() async {
     final userId = await _loadUser();
-    await _fetchDetail(userId: userId);
+    await Future.wait([
+      _fetchDetail(userId: userId),
+      _loadUserBundleAccess(userId: userId),
+      _loadCategoryPlanType(),
+    ]);
+  }
+
+  /// Load the plan type for this topic's category
+  Future<void> _loadCategoryPlanType() async {
+    try {
+      final response = await _api.fetchCategories();
+      if (!mounted) return;
+      
+      final category = response.data.firstWhere(
+        (c) => c.name == widget.topic.categoryName || c.id == widget.topic.categoryId,
+        orElse: () => CourseCategory(
+          id: 0,
+          name: '',
+          description: '',
+          topicsCount: 0,
+          displayOrder: 0,
+          planType: 'INDIVIDUAL',
+          bundlePrice: '0',
+          price: '0',
+          flexiblePurchase: false,
+        ),
+      );
+      
+      if (!mounted) return;
+      setState(() {
+        _categoryPlanType = category.planType;
+      });
+      
+      debugPrint('✅ Topic category plan type: ${widget.topic.categoryName} = $_categoryPlanType');
+    } catch (e) {
+      debugPrint('Error loading category plan type: $e');
+    }
+  }
+
+  /// Load user's purchased bundles and check if they have access to this topic's category
+  Future<void> _loadUserBundleAccess({int? userId}) async {
+    final resolvedUserId = userId ?? _userId;
+    if (resolvedUserId == null) return;
+
+    try {
+      final bundles = await _api.fetchUserBundles(userId: resolvedUserId);
+      if (!mounted) return;
+
+      // Check if any purchased bundle includes this topic's category
+      final topicCategoryName = widget.topic.categoryName;
+      bool hasAccess = false;
+
+      // First, try to match by category ID if available
+      if (widget.topic.categoryId != null) {
+        hasAccess = bundles.any((b) => b.categoryId == widget.topic.categoryId);
+      }
+      
+      // If no categoryId match, try to match by category name
+      if (!hasAccess && topicCategoryName != null) {
+        hasAccess = bundles.any((b) => b.categoryName == topicCategoryName);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _hasBundleAccess = hasAccess;
+      });
+      
+      debugPrint('✅ Topic bundle access check: categoryName=$topicCategoryName, hasBundleAccess=$hasAccess');
+    } catch (e) {
+      debugPrint('Error loading user bundles for topic detail: $e');
+    }
   }
 
   @override
@@ -801,14 +1147,12 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
               backgroundColor: Color(0xFF22C55E),
             ),
           );
-          
           setState(() {
-            // Mark user as enrolled since payment verification succeeded
             _detail = _detail?.copyWith(isEnrolled: true);
           });
+          // Pop with result true to trigger dashboard refresh
+          Navigator.pop(context, true);
         }
-        // Don't refresh detail here - user might see buttons flash
-        // The UI is already updated with isEnrolled: true
       } else {
         debugPrint('❌ Razorpay | Verification failed: ${enrollResponse.message}');
         messenger.showSnackBar(
@@ -832,11 +1176,13 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
 
   void _handlePaymentError(PaymentFailureResponse response) {
     // Handle Razorpay payment failure
-    final errorMessage = response.message ?? response.code ?? 'Payment cancelled';
+    final message = response.message;
+    final code = response.code?.toString();
+    final errorMessage = (message == null || message.isEmpty || message == 'undefined')
+        ? ((code == null || code.isEmpty || code == 'undefined') ? 'Payment was cancelled' : 'Error code: $code')
+        : message;
     debugPrint('Razorpay | Payment Error - Code: ${response.code}, Message: ${response.message}');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Payment failed: $errorMessage')),
-    );
+    CustomSnackbar.showError(context, errorMessage);
     setState(() => _processingCheckout = false);
   }
 
@@ -854,17 +1200,35 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
     final detail = _detail;
     final bool summaryEnrolled = summary.isEnrolled;
     final bool detailEnrolled = detail?.isEnrolled ?? false;
-    final bool isEnrolled = widget.fromEnrollments || detailEnrolled || summaryEnrolled;
+    // Include bundle access check - user may have purchased a bundle that includes this topic
+    final bool isEnrolled = widget.fromEnrollments || detailEnrolled || summaryEnrolled || _hasBundleAccess;
     final bool isFreeCourse = detail?.isFree ?? summary.isFree || summary.price == 0;
     final num priceValue = detail?.price ?? summary.price;
+    
+    // Wait for category plan type to load before determining display logic
+    final planType = _categoryPlanType ?? 'INDIVIDUAL';
+    
+    // Display logic based on category plan type:
+    // FREE: show "Free" for free topics
+    // BUNDLE: show "Bundle Purchase Only" - no individual purchase allowed
+    // FLEXIBLE: show individual price - can purchase individually OR via bundle
+    // INDIVIDUAL: show individual price
+    
+    final bool shouldShowPrice = (planType == 'INDIVIDUAL' || planType == 'FLEXIBLE') && !isFreeCourse;
+    final bool shouldShowFree = planType == 'FREE' && isFreeCourse;
+    final bool isBundleOnly = planType == 'BUNDLE';
+    
     final String formattedPrice;
     if (priceValue % 1 == 0) {
       formattedPrice = '₹${priceValue.toInt()}';
     } else {
       formattedPrice = '₹${priceValue.toStringAsFixed(2)}';
     }
-    final String priceDisplay = isFreeCourse ? 'Free' : formattedPrice;
-    final String badgeLabel = isEnrolled ? 'Enrolled' : priceDisplay;
+    
+    final String badgeLabel = isEnrolled 
+        ? 'Enrolled' 
+        : (_categoryPlanType == null ? '' : (shouldShowFree ? 'Free' : (isBundleOnly ? 'Bundle Purchase Only' : formattedPrice)));
+    final String priceDisplay = shouldShowFree ? 'Free' : formattedPrice;
     final heroTag = topicHeroTag(summary.id);
     final heroTitle = (((detail?.title) ?? '').isNotEmpty)
         ? detail!.title
@@ -1062,7 +1426,12 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
                         ],
                       ),
                     ),
-      bottomNavigationBar: !_loading && _error == null && detail != null && !isEnrolled && !widget.fromEnrollments
+      // Show bottom bar only for:
+      // - FREE category with free topics (free enrollment)
+      // - INDIVIDUAL category (individual purchase)
+      // - FLEXIBLE category (can purchase individually or via bundle)
+      // Do NOT show for BUNDLE category (bundle purchase only)
+      bottomNavigationBar: !_loading && _error == null && detail != null && !isEnrolled && !widget.fromEnrollments && !isBundleOnly
           ? _BottomBar(
               priceLabel: priceDisplay,
               isFree: isFreeCourse,
@@ -1099,10 +1468,20 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
     if (isFreeCourse) {
       setState(() => _processingCheckout = true);
       try {
+        // Get FCM token for notification
+        String? fcmToken;
+        try {
+          fcmToken = await FirebaseMessaging.instance.getToken();
+          debugPrint('📲 FCM Token for enrollment: ${fcmToken != null ? '✅ Obtained' : '❌ NULL'}');
+        } catch (e) {
+          debugPrint('⚠️ Failed to get FCM token: $e');
+        }
+
         final response = await _api.enrollFreeCourse(
           userId: userId,
           topicId: detail.id,
           email: email,
+          fcmToken: fcmToken,
         );
 
         if (response.success) {
@@ -1114,14 +1493,12 @@ class _TopicDetailScreenState extends State<TopicDetailScreen>
                 backgroundColor: Color(0xFF22C55E),
               ),
             );
-            
             setState(() {
-              // Mark user as enrolled since enrollment succeeded
               _detail = _detail?.copyWith(isEnrolled: true);
             });
+            // Pop with result true to trigger dashboard refresh
+            Navigator.pop(context, true);
           }
-          // Don't refresh detail here - user might see buttons flash
-          // The UI is already updated with isEnrolled: true
         } else {
           final message = response.message.isNotEmpty
               ? response.message
@@ -1557,17 +1934,20 @@ class _ModuleItemState extends State<_ModuleItem> {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFFF8FBFF), Color(0xFFF1F5FF)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: _expanded 
+              ? _primaryRed.withOpacity(0.25) 
+              : _lightText.withOpacity(0.08),
+          width: _expanded ? 1.5 : 1,
         ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _lightText.withOpacity(0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
+            color: _expanded 
+                ? _primaryRed.withOpacity(0.08) 
+                : Colors.black.withOpacity(0.04),
+            blurRadius: _expanded ? 16 : 10,
             offset: const Offset(0, 4),
           ),
         ],
@@ -1578,20 +1958,29 @@ class _ModuleItemState extends State<_ModuleItem> {
             onTap: canExpand
                 ? () => setState(() => _expanded = !_expanded)
                 : null,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(20),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
+                  // Module number with gradient background
                   Container(
-                    width: 44,
-                    height: 44,
+                    width: 50,
+                    height: 50,
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: isUnlocked
+                            ? [_primaryRed.withOpacity(0.9), _primaryRed]
+                            : [_lightText.withOpacity(0.4), _lightText.withOpacity(0.6)],
+                      ),
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.06),
+                          color: isUnlocked 
+                              ? _primaryRed.withOpacity(0.25) 
+                              : Colors.black.withOpacity(0.06),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),
@@ -1601,8 +1990,8 @@ class _ModuleItemState extends State<_ModuleItem> {
                       child: Text(
                         '${widget.index}',
                         style: const TextStyle(
-                          color: _darkText,
-                          fontSize: 16,
+                          color: Colors.white,
+                          fontSize: 18,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -1613,98 +2002,89 @@ class _ModuleItemState extends State<_ModuleItem> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Title row
+                        TranslatedText(
+                          module.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isUnlocked ? _darkText : _lightText,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            height: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        // Info chips row
                         Row(
                           children: [
-                            Expanded(
-                              child: TranslatedText(
-                                module.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: _darkText,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  height: 1.3,
-                                ),
-                              ),
+                            _ModernInfoChip(
+                              icon: Icons.play_circle_outline_rounded,
+                              label: hasVideos ? '${module.videos.length} lessons' : 'No videos',
+                              isActive: isUnlocked && hasVideos,
                             ),
                             const SizedBox(width: 8),
-                            // Container(
-                            //   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            //   decoration: BoxDecoration(
-                            //     color: isUnlocked
-                            //         ? const Color(0xFFE8F6FF)
-                            //         : _primaryRed.withValues(alpha: 0.08),
-                            //     borderRadius: BorderRadius.circular(12),
-                            //   ),
-                            //   child: Row(
-                            //     mainAxisSize: MainAxisSize.min,
-                            //     children: [
-                            //       Icon(
-                            //         isUnlocked ? Icons.lock_open_rounded : Icons.lock_outline,
-                            //         size: 14,
-                            //         color: isUnlocked ? _primaryRed : _primaryRed,
-                            //       ),
-                            //       // const SizedBox(width: 6),
-                            //       // TranslatedText(
-                            //       //   isUnlocked ? 'Accessible' : 'Locked',
-                            //       //   style: const TextStyle(
-                            //       //     color: _primaryRed,
-                            //       //     fontSize: 11,
-                            //       //     fontWeight: FontWeight.w700,
-                            //       //   ),
-                            //       // ),
-                            //     ],
-                            //   ),
-                            // ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _InfoChip(icon: Icons.movie_filter, label: hasVideos ? '${module.videos.length} lesson${module.videos.length == 1 ? '' : 's'}' : 'No videos yet'),
-                            _InfoChip(icon: Icons.schedule, label: hasVideos ? totalDuration : 'Coming soon'),
-                            if (shouldShowDescription)
-                              const _InfoChip(icon: Icons.menu_book, label: 'Summary ready'),
+                            _ModernInfoChip(
+                              icon: Icons.access_time_rounded,
+                              label: hasVideos ? totalDuration : 'Coming soon',
+                              isActive: isUnlocked && hasVideos,
+                            ),
                           ],
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 8),
+                  // Expand/Locked indicator
                   if (canExpand)
-                    Icon(
-                      _expanded ? Icons.expand_less : Icons.expand_more,
-                      color: _darkText,
-                      size: 24,
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _primaryRed.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: _primaryRed,
+                          size: 22,
+                        ),
+                      ),
                     )
                   else if (!isUnlocked)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: _primaryRed.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
+                        color: _primaryRed.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const TranslatedText(
-                        'Locked',
-                        style: TextStyle(
-                          color: _primaryRed,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.lock_rounded, size: 14, color: _primaryRed),
+                          const SizedBox(width: 4),
+                          const TranslatedText(
+                            'Locked',
+                            style: TextStyle(
+                              color: _primaryRed,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
                     )
                   else
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: _lightText.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(8),
+                        color: _lightText.withOpacity(0.1),
+                        shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        Icons.lock_clock,
+                        Icons.hourglass_empty_rounded,
                         color: _lightText,
                         size: 18,
                       ),
@@ -1713,71 +2093,140 @@ class _ModuleItemState extends State<_ModuleItem> {
               ),
             ),
           ),
-          if (_expanded && canExpand)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (shouldShowDescription) ...[
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      margin: EdgeInsets.only(bottom: hasVideos ? 12 : 0),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: _lightText.withOpacity(0.15)),
+          // Expanded content with smooth animation
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: canExpand ? _buildExpandedContent(module, isUnlocked, shouldShowDescription, hasVideos) : const SizedBox.shrink(),
+            crossFadeState: _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 200),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpandedContent(TopicModule module, bool isUnlocked, bool shouldShowDescription, bool hasVideos) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAFBFD),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(20),
+          bottomRight: Radius.circular(20),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Divider
+            Container(
+              height: 1,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    _primaryRed.withOpacity(0.2),
+                    _primaryRed.withOpacity(0.05),
+                  ],
+                ),
+              ),
+            ),
+            // Description section
+            if (shouldShowDescription) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                margin: EdgeInsets.only(bottom: hasVideos ? 14 : 0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _primaryRed.withOpacity(0.15)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: _primaryRed.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.description_outlined,
+                            color: _primaryRed,
+                            size: 16,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const TranslatedText(
+                          'Module Overview',
+                          style: TextStyle(
+                            color: _darkText,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: 300, // Maximum height for description before scrolling
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.description_outlined,
-                                color: _primaryRed,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              const TranslatedText(
-                                'Module Description',
-                                style: TextStyle(
-                                  color: _darkText,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
+                      child: SingleChildScrollView(
+                        child: _FormattedText(
+                          text: module.description,
+                          baseStyle: const TextStyle(
+                            color: _lightText,
+                            fontSize: 13,
+                            height: 1.5,
                           ),
-                          const SizedBox(height: 12),
-                          TranslatedText(
-                            module.description,
-                            style: const TextStyle(
-                              color: _lightText,
-                              fontSize: 13,
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ],
-                  ...module.videos.map((video) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: _VideoListItem(
-                        video: video,
-                        isUnlocked: isUnlocked,
-                        playlist: module.videos,
-                        initialIndex: module.videos.indexOf(video),
-                      ),
-                    );
-                  }).toList(),
-                ],
+                ),
               ),
-            ),
-        ],
+            ],
+            // Videos list
+            if (hasVideos) ...[
+              // Videos header
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.video_library_rounded, size: 18, color: _primaryRed),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${module.videos.length} Video${module.videos.length == 1 ? '' : 's'}',
+                      style: const TextStyle(
+                        color: _darkText,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ...module.videos.asMap().entries.map((entry) {
+                final index = entry.key;
+                final video = entry.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _VideoListItem(
+                    video: video,
+                    isUnlocked: isUnlocked,
+                    playlist: module.videos,
+                    initialIndex: index,
+                  ),
+                );
+              }).toList(),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1796,6 +2245,48 @@ class _ModuleItemState extends State<_ModuleItem> {
     if (widget.module.videos.isEmpty) return 'Coming soon';
     final count = widget.module.videos.length;
     return '$count video${count == 1 ? '' : 's'}';
+  }
+}
+
+class _ModernInfoChip extends StatelessWidget {
+  const _ModernInfoChip({
+    required this.icon,
+    required this.label,
+    this.isActive = true,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool isActive;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isActive ? _primaryRed.withOpacity(0.08) : _lightText.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 13,
+            color: isActive ? _primaryRed : _lightText,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              color: isActive ? _primaryRed : _lightText,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -1864,95 +2355,218 @@ class _VideoListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final thumbnailUrl = video.thumbnailUrl;
+    final hasThumbnail = thumbnailUrl != null && thumbnailUrl.isNotEmpty;
+    
     return InkWell(
       onTap: () => _handleTap(context),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.all(14), // Slightly more padding
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _lightText.withValues(alpha: 0.15)),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isUnlocked 
+                ? _primaryRed.withOpacity(0.12) 
+                : _lightText.withOpacity(0.12),
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
           ],
         ),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isUnlocked
-                    ? _primaryRed.withValues(alpha: 0.1)
-                    : _lightText.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
+            // Thumbnail section
+            ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                bottomLeft: Radius.circular(16),
               ),
-              child: Icon(
-                isUnlocked ? Icons.play_arrow : Icons.lock_outline,
-                color: isUnlocked ? _primaryRed : _lightText,
-                size: 20,
+              child: Stack(
+                children: [
+                  SizedBox(
+                    width: 110,
+                    height: 75,
+                    child: hasThumbnail
+                        ? Image.network(
+                            thumbnailUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => _buildVideoThumbnailPlaceholder(),
+                          )
+                        : _buildVideoThumbnailPlaceholder(),
+                  ),
+                  // Play overlay
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                          colors: [
+                            Colors.black.withOpacity(0.1),
+                            Colors.black.withOpacity(0.3),
+                          ],
+                        ),
+                      ),
+                      child: Center(
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: isUnlocked 
+                                ? Colors.white.withOpacity(0.95) 
+                                : Colors.black.withOpacity(0.5),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.2),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            isUnlocked ? Icons.play_arrow_rounded : Icons.lock_rounded,
+                            color: isUnlocked ? _primaryRed : Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Duration badge
+                  if (_durationLabel().isNotEmpty)
+                    Positioned(
+                      bottom: 4,
+                      right: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.75),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _durationLabel(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
-            const SizedBox(width: 12),
+            // Content section
             Expanded(
-              child: TranslatedText(
-                video.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _darkText,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Video number and preview badge row
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isUnlocked 
+                                ? _primaryRed.withOpacity(0.1) 
+                                : _lightText.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Lesson ${initialIndex + 1}',
+                            style: TextStyle(
+                              color: isUnlocked ? _primaryRed : _lightText,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (video.isPreview) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF22C55E).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.visibility_rounded, size: 10, color: Color(0xFF22C55E)),
+                                SizedBox(width: 3),
+                                Text(
+                                  'Preview',
+                                  style: TextStyle(
+                                    color: Color(0xFF22C55E),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    // Title
+                    TranslatedText(
+                      video.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isUnlocked ? _darkText : _lightText,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(width: 8),
-            if (video.isPreview) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _primaryRed.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  'Preview',
-                  style: TextStyle(
-                    color: _primaryRed,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+            // Arrow icon
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: isUnlocked ? _primaryRed.withOpacity(0.6) : _lightText.withOpacity(0.4),
+                size: 16,
               ),
-              const SizedBox(width: 8),
-            ],
-            if (_durationLabel().isNotEmpty) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _cardBg,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _durationLabel(),
-                  style: const TextStyle(
-                    color: _darkText,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-            ],
-            Icon(
-              isUnlocked ? Icons.chevron_right : Icons.lock_outline,
-              color: _lightText,
-              size: 20,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoThumbnailPlaceholder() {
+    return Container(
+      width: 110,
+      height: 75,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF1E3A5F).withOpacity(0.8),
+            const Color(0xFF2D5A87).withOpacity(0.8),
+          ],
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.videocam_rounded,
+          color: Colors.white.withOpacity(0.4),
+          size: 28,
         ),
       ),
     );
@@ -2604,9 +3218,9 @@ class _DescriptionTab extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            TranslatedText(
-              detail.description,
-              style: const TextStyle(
+            _FormattedText(
+              text: detail.description,
+              baseStyle: const TextStyle(
                 color: _lightText,
                 fontSize: 14,
                 height: 1.6,
@@ -2624,9 +3238,9 @@ class _DescriptionTab extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            TranslatedText(
-              _cleanText(detail.learningObjectives),
-              style: const TextStyle(
+            _FormattedText(
+              text: _cleanText(detail.learningObjectives),
+              baseStyle: const TextStyle(
                 color: _lightText,
                 fontSize: 14,
                 height: 1.6,
@@ -2663,14 +3277,15 @@ class _DescriptionTab extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            TranslatedText(
-              detail.prerequisites,
-              style: const TextStyle(
+            _FormattedText(
+              text: detail.prerequisites,
+              baseStyle: const TextStyle(
                 color: _lightText,
                 fontSize: 14,
                 height: 1.6,
               ),
             ),
+            const SizedBox(height: 24),
           ],
           const SizedBox(height: 32),
           _DescriptionFooter(),
@@ -2960,6 +3575,101 @@ class _ModulesFooter extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// Custom widget to parse and display formatted text (handles ** for bold and * for bullet points)
+class _FormattedText extends StatelessWidget {
+  final String text;
+  final TextStyle baseStyle;
+
+  const _FormattedText({
+    required this.text,
+    required this.baseStyle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = text.split('\n');
+    final widgets = <Widget>[];
+
+    for (var line in lines) {
+      line = line.trim();
+      if (line.isEmpty) {
+        widgets.add(const SizedBox(height: 8));
+        continue;
+      }
+
+      // Check if it's a bullet point
+      if (line.startsWith('*') && !line.startsWith('**')) {
+        final bulletText = line.substring(1).trim();
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.only(left: 16, bottom: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('• ', style: baseStyle),
+                Expanded(
+                  child: _buildRichText(bulletText),
+                ),
+              ],
+            ),
+          ),
+        );
+      } else {
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: _buildRichText(line),
+          ),
+        );
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: widgets,
+    );
+  }
+
+  Widget _buildRichText(String text) {
+    final spans = <InlineSpan>[];
+    final regex = RegExp(r'\*\*(.*?)\*\*');
+    int lastIndex = 0;
+
+    for (var match in regex.allMatches(text)) {
+      // Add text before the match
+      if (match.start > lastIndex) {
+        spans.add(TextSpan(
+          text: text.substring(lastIndex, match.start),
+          style: baseStyle,
+        ));
+      }
+
+      // Add bold text
+      spans.add(TextSpan(
+        text: match.group(1),
+        style: baseStyle.copyWith(
+          fontWeight: FontWeight.w700,
+          color: _darkText,
+        ),
+      ));
+
+      lastIndex = match.end;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(lastIndex),
+        style: baseStyle,
+      ));
+    }
+
+    return Text.rich(
+      TextSpan(children: spans),
     );
   }
 }

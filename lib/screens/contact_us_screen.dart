@@ -417,19 +417,6 @@ class _ContactUsScreenState extends State<ContactUsScreen> with SingleTickerProv
                         const SizedBox(height: 12),
                       ],
 
-                      // Support Email
-                      if (_contact!.supportEmail.isNotEmpty) ...[
-                        _buildEnhancedContactCard(
-                          icon: Icons.headset_mic_outlined,
-                          title: 'Customer Support',
-                          subtitle: _contact!.supportEmail,
-                          gradient: const [Color(0xFF8B5CF6), Color(0xFF7C3AED)],
-                          onTap: () => _launchEmail(_contact!.supportEmail),
-                          delay: 200,
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-
                       const SizedBox(height: 28),
 
                       // Additional Information

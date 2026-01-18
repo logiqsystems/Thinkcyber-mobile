@@ -127,22 +127,57 @@ class _AccountScreenState extends State<AccountScreen> {
       builder: (context) => _FrostDialog(
         title: 'Final Warning',
         subtitle:
-        'This is your final chance. All your data will be permanently deleted. Type "CLOSE" to confirm.',
+        'This is your final chance. All your data will be permanently deleted. You will be redirected to complete the account closure process.',
         primaryLabel: 'I Understand',
         primaryColor: _danger,
-        onPrimary: () {
+        onPrimary: () async {
           Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: TranslatedText('Please contact support to close your account.'),
-              duration: Duration(seconds: 3),
-            ),
-          );
+          await _openCloseAccountPage();
         },
         secondaryLabel: 'Cancel',
         onSecondary: () => Navigator.pop(context),
       ),
     );
+  }
+
+  Future<void> _openCloseAccountPage() async {
+    try {
+      final userId = await SessionService.getUserId();
+      if (userId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: TranslatedText('Unable to retrieve user information. Please try again.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+
+      final url = Uri.parse('https://thinkcyber.info/mobile/delete-account/$userId');
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: TranslatedText('Unable to open the account closure page. Please try again later.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: TranslatedText('Error: ${e.toString()}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -194,9 +229,6 @@ class _AccountScreenState extends State<AccountScreen> {
                         _HeroIdentityCard(
                           name: _userName ?? 'User',
                           email: _userEmail ?? 'Not set',
-                          onQuickEmail: (_userEmail != null && _userEmail!.contains('@'))
-                              ? () => _launchEmail(_userEmail!)
-                              : null,
                         ),
                         const SizedBox(height: 14),
 
@@ -233,54 +265,6 @@ class _AccountScreenState extends State<AccountScreen> {
                         //     ],
                         //   ),
                         // ),
-
-                        if (_contact != null) ...[
-                          const SizedBox(height: 14),
-                          _GlassSection(
-                            title: 'Support',
-                            caption: 'Get help instantly',
-                            trailing: _MiniPill(
-                              text: '24/7',
-                              icon: Icons.bolt_rounded,
-                              gradient: const [Color(0xFF2E7DFF), Color(0xFF00D4FF)],
-                            ),
-                            child: Column(
-                              children: [
-                                if (_contact!.supportEmail.isNotEmpty) ...[
-                                  _SmartTile(
-                                    icon: Icons.support_agent_rounded,
-                                    title: 'Contact Support',
-                                    subtitle: _contact!.supportEmail,
-                                    tone: _Tone.blue,
-                                    onTap: () => _launchEmail(_contact!.supportEmail),
-                                    trailingText: 'Email',
-                                  ),
-                                  const SizedBox(height: 10),
-                                ],
-                                if (_contact!.phone.isNotEmpty) ...[
-                                  _SmartTile(
-                                    icon: Icons.call_rounded,
-                                    title: 'Call Us',
-                                    subtitle: _contact!.phone,
-                                    tone: _Tone.green,
-                                    onTap: () => _launchPhone(_contact!.phone),
-                                    trailingText: 'Call',
-                                  ),
-                                  const SizedBox(height: 10),
-                                ],
-                                if (_contact!.email.isNotEmpty)
-                                  _SmartTile(
-                                    icon: Icons.mail_rounded,
-                                    title: 'General Inquiry',
-                                    subtitle: _contact!.email,
-                                    tone: _Tone.violet,
-                                    onTap: () => _launchEmail(_contact!.email),
-                                    trailingText: 'Email',
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
 
                         const SizedBox(height: 14),
                         _GlassSection(
@@ -481,12 +465,10 @@ class _HeroIdentityCard extends StatelessWidget {
   const _HeroIdentityCard({
     required this.name,
     required this.email,
-    this.onQuickEmail,
   });
 
   final String name;
   final String email;
-  final VoidCallback? onQuickEmail;
 
   static const _text = Color(0xFF0B1220);
   static const _muted = Color(0xFF6B7280);
@@ -576,13 +558,6 @@ class _HeroIdentityCard extends StatelessWidget {
                 ],
               ),
             ),
-            if (onQuickEmail != null) ...[
-              const SizedBox(width: 10),
-              _RoundAction(
-                icon: Icons.mail_rounded,
-                onTap: onQuickEmail!,
-              ),
-            ],
           ],
         ),
       ),

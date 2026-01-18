@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../widgets/translated_text.dart';
+import '../services/api_client.dart';
+import '../services/session_service.dart';
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -10,122 +12,192 @@ class NotificationScreen extends StatefulWidget {
 
 class _NotificationScreenState extends State<NotificationScreen> {
   final List<NotificationItem> _notifications = [];
+  final _api = ThinkCyberApi();
+  bool _isLoading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadSampleNotifications();
+    _loadNotifications();
   }
 
-  void _loadSampleNotifications() {
-    // Sample static notifications
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadNotifications() async {
     setState(() {
-      _notifications.addAll([
-        NotificationItem(
-          id: 1,
-          title: 'Course Enrollment Successful! 🎉',
-          message: 'You have successfully enrolled in "Cybersecurity Essentials". Start learning now!',
-          type: NotificationType.success,
-          time: DateTime.now().subtract(const Duration(minutes: 5)),
-          isRead: false,
-          icon: Icons.check_circle,
-        ),
-        NotificationItem(
-          id: 2,
-          title: 'New Course Available',
-          message: 'Check out the latest course "Advanced Ethical Hacking" now available in your category.',
-          type: NotificationType.info,
-          time: DateTime.now().subtract(const Duration(hours: 2)),
-          isRead: false,
-          icon: Icons.school,
-        ),
-        NotificationItem(
-          id: 3,
-          title: 'Course Reminder ⏰',
-          message: 'You have 3 pending modules in "Web Application Security". Continue your progress!',
-          type: NotificationType.reminder,
-          time: DateTime.now().subtract(const Duration(hours: 6)),
-          isRead: true,
-          icon: Icons.access_time,
-        ),
-        NotificationItem(
-          id: 4,
-          title: 'Payment Successful 💳',
-          message: 'Your payment of ₹299.00 for "Network Security Fundamentals" has been processed successfully.',
-          type: NotificationType.payment,
-          time: DateTime.now().subtract(const Duration(days: 1)),
-          isRead: true,
-          icon: Icons.payment,
-        ),
-        NotificationItem(
-          id: 5,
-          title: 'Certificate Ready! 🏆',
-          message: 'Congratulations! Your certificate for "Introduction to Cybersecurity" is ready for download.',
-          type: NotificationType.achievement,
-          time: DateTime.now().subtract(const Duration(days: 2)),
-          isRead: false,
-          icon: Icons.workspace_premium,
-        ),
-        NotificationItem(
-          id: 6,
-          title: 'Course Update',
-          message: 'New content has been added to "Penetration Testing Basics". Check out the latest modules!',
-          type: NotificationType.update,
-          time: DateTime.now().subtract(const Duration(days: 3)),
-          isRead: true,
-          icon: Icons.update,
-        ),
-        NotificationItem(
-          id: 7,
-          title: 'Special Offer! 🎁',
-          message: 'Get 50% off on all premium courses. Limited time offer ending in 2 days!',
-          type: NotificationType.promotion,
-          time: DateTime.now().subtract(const Duration(days: 4)),
-          isRead: true,
-          icon: Icons.local_offer,
-        ),
-        NotificationItem(
-          id: 8,
-          title: 'Welcome to ThinkCyber! 👋',
-          message: 'Welcome to our learning platform. Explore courses and start your cybersecurity journey today.',
-          type: NotificationType.welcome,
-          time: DateTime.now().subtract(const Duration(days: 7)),
-          isRead: true,
-          icon: Icons.waving_hand,
-        ),
-      ]);
+      _isLoading = true;
+      _error = null;
     });
-  }
 
-  void _markAsRead(int notificationId) {
-    setState(() {
-      final index = _notifications.indexWhere((n) => n.id == notificationId);
-      if (index >= 0) {
-        _notifications[index] = _notifications[index].copyWith(isRead: true);
+    try {
+      final userId = await SessionService.getUserId();
+      if (userId == null) {
+        setState(() {
+          _error = 'User not logged in';
+          _isLoading = false;
+        });
+        return;
       }
-    });
+
+      final response = await _api.fetchNotificationsHistory(userId);
+
+      if (response.success) {
+        setState(() {
+          _notifications.clear();
+          _notifications.addAll(
+            response.data.map((n) => NotificationItem(
+              id: n.id,
+              title: n.title,
+              message: n.message,
+              type: _mapNotificationType(n.type),
+              time: DateTime.tryParse(n.createdAt) ?? DateTime.now(),
+              isRead: n.isRead,
+              icon: _mapNotificationIcon(n.type, n.icon),
+            )).toList(),
+          );
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _error = 'Failed to load notifications';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to load notifications: $e');
+      setState(() {
+        _error = 'Failed to load notifications';
+        _isLoading = false;
+      });
+    }
   }
 
-  void _markAllAsRead() {
-    setState(() {
-      for (int i = 0; i < _notifications.length; i++) {
-        _notifications[i] = _notifications[i].copyWith(isRead: true);
+  NotificationType _mapNotificationType(String type) {
+    switch (type.toLowerCase()) {
+      case 'success':
+        return NotificationType.success;
+      case 'info':
+        return NotificationType.info;
+      case 'reminder':
+        return NotificationType.reminder;
+      case 'payment':
+        return NotificationType.payment;
+      case 'achievement':
+        return NotificationType.achievement;
+      case 'update':
+        return NotificationType.update;
+      case 'promotion':
+        return NotificationType.promotion;
+      case 'welcome':
+        return NotificationType.welcome;
+      default:
+        return NotificationType.info;
+    }
+  }
+
+  IconData _mapNotificationIcon(String type, String? iconName) {
+    // If icon name is provided, try to match it
+    if (iconName != null) {
+      switch (iconName.toLowerCase()) {
+        case 'check_circle':
+          return Icons.check_circle;
+        case 'school':
+          return Icons.school;
+        case 'access_time':
+          return Icons.access_time;
+        case 'payment':
+          return Icons.payment;
+        case 'workspace_premium':
+          return Icons.workspace_premium;
+        case 'update':
+          return Icons.update;
+        case 'local_offer':
+          return Icons.local_offer;
+        case 'waving_hand':
+          return Icons.waving_hand;
+        case 'notifications':
+          return Icons.notifications;
       }
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: TranslatedText('All notifications marked as read'),
-        backgroundColor: Color(0xFF22C55E),
-      ),
-    );
+    }
+
+    // Fallback to type-based icons
+    switch (type.toLowerCase()) {
+      case 'success':
+        return Icons.check_circle;
+      case 'info':
+        return Icons.info;
+      case 'reminder':
+        return Icons.access_time;
+      case 'payment':
+        return Icons.payment;
+      case 'achievement':
+        return Icons.workspace_premium;
+      case 'update':
+        return Icons.update;
+      case 'promotion':
+        return Icons.local_offer;
+      case 'welcome':
+        return Icons.waving_hand;
+      default:
+        return Icons.notifications;
+    }
+  }
+
+  Future<void> _markAsRead(int notificationId) async {
+    try {
+      await _api.markNotificationAsRead(notificationId);
+      setState(() {
+        final index = _notifications.indexWhere((n) => n.id == notificationId);
+        if (index >= 0) {
+          _notifications[index] = _notifications[index].copyWith(isRead: true);
+        }
+      });
+    } catch (e) {
+      debugPrint('⚠️ Failed to mark notification as read: $e');
+    }
+  }
+
+  Future<void> _markAllAsRead() async {
+    try {
+      final userId = await SessionService.getUserId();
+      if (userId == null) return;
+
+      await _api.markAllNotificationsAsRead(userId);
+      setState(() {
+        for (int i = 0; i < _notifications.length; i++) {
+          _notifications[i] = _notifications[i].copyWith(isRead: true);
+        }
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: TranslatedText('All notifications marked as read'),
+          backgroundColor: Color(0xFF22C55E),
+        ),
+      );
+    } catch (e) {
+      debugPrint('⚠️ Failed to mark all notifications as read: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: TranslatedText('Failed to mark notifications as read'),
+          backgroundColor: Color(0xFFFF4757),
+        ),
+      );
+    }
   }
 
   void _deleteNotification(int notificationId) {
     setState(() {
       _notifications.removeWhere((n) => n.id == notificationId);
     });
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: TranslatedText('Notification deleted'),
@@ -137,7 +209,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   @override
   Widget build(BuildContext context) {
     final unreadCount = _notifications.where((n) => !n.isRead).length;
-    
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
@@ -157,6 +229,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
         ),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Color(0xFF2D3142)),
+            onPressed: _loadNotifications,
+          ),
           if (unreadCount > 0)
             TextButton(
               onPressed: _markAllAsRead,
@@ -171,9 +247,47 @@ class _NotificationScreenState extends State<NotificationScreen> {
             ),
         ],
       ),
-      body: _notifications.isEmpty
-          ? const _EmptyNotificationWidget()
-          : Column(
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(
+                color: Color(0xFF2E7DFF),
+              ),
+            )
+          : _error != null
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 64,
+                        color: Colors.grey[400],
+                      ),
+                      const SizedBox(height: 16),
+                      TranslatedText(
+                        _error!,
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: _loadNotifications,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2E7DFF),
+                        ),
+                        child: const TranslatedText(
+                          'Retry',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : _notifications.isEmpty
+                  ? const _EmptyNotificationWidget()
+                  : Column(
               children: [
                 if (unreadCount > 0)
                   Container(
@@ -205,7 +319,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                       ],
                     ),
                   ),
-                
+
                 Expanded(
                   child: ListView.separated(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
