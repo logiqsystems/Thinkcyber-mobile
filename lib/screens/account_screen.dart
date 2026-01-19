@@ -7,6 +7,7 @@ import '../services/api_client.dart';
 import '../services/localization_service.dart';
 import '../services/session_service.dart';
 import '../widgets/translated_text.dart';
+import 'account_closure_webview_screen.dart';
 import 'login_screen.dart';
 
 class AccountScreen extends StatefulWidget {
@@ -155,18 +156,13 @@ class _AccountScreenState extends State<AccountScreen> {
         return;
       }
 
-      final url = Uri.parse('https://thinkcyber.info/mobile/delete-account/$userId');
-      if (await canLaunchUrl(url)) {
-        await launchUrl(url, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: TranslatedText('Unable to open the account closure page. Please try again later.'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
+      // Navigate to the WebView screen for account closure
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => AccountClosureWebViewScreen(userId: userId.toString()),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+// Base URL for images (without /api suffix)
+const String _imageBaseUrl = 'https://api.thinkcyber.info';
+
 // Default gradient for all topics
 LinearGradient topicGradientFor(String seed) {
   return const LinearGradient(
@@ -74,18 +77,48 @@ class TopicImage extends StatelessWidget {
   final double? width;
   final double? height;
 
+  // Normalize URL to handle relative paths from API
+  String _normalizeUrl(String url) {
+    if (url.isEmpty) return '';
+    
+    // Skip Windows local paths (these are invalid for network images)
+    if (url.contains('C:\\') || url.contains('D:/') || url.contains('C:/')) {
+      debugPrint('TopicImage: Skipping local path: $url');
+      return '';
+    }
+    
+    // If it's already a full URL, return as-is
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    
+    // If it's a relative path starting with /, prepend base URL
+    if (url.startsWith('/')) {
+      final fullUrl = '$_imageBaseUrl$url';
+      debugPrint('TopicImage: Normalized relative URL: $url -> $fullUrl');
+      return fullUrl;
+    }
+    
+    // For other relative paths, prepend base URL with /
+    final fullUrl = '$_imageBaseUrl/$url';
+    debugPrint('TopicImage: Normalized path: $url -> $fullUrl');
+    return fullUrl;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final hasUrl = imageUrl.isNotEmpty;
+    final normalizedUrl = _normalizeUrl(imageUrl);
+    final hasUrl = normalizedUrl.isNotEmpty;
 
     return SizedBox(
       width: width,
       height: height,
       child: hasUrl
           ? Image.network(
-              imageUrl,
+              normalizedUrl,
               fit: fit,
               errorBuilder: (context, error, stackTrace) {
+                debugPrint('TopicImage: Failed to load $normalizedUrl - $error');
                 return TopicThumbnailFallback(title: title);
               },
             )

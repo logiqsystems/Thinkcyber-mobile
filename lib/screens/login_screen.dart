@@ -643,7 +643,54 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         ),
       );
 
-      if (!response.success) return;
+      if (!response.success) {
+        // Check if user needs to verify email
+        if (response.message.toLowerCase().contains('verify your email') ||
+            response.message.toLowerCase().contains('email not verified')) {
+          // Send OTP first, then redirect to OTP verification for email verification
+          try {
+            final resendResponse = await _api.resendOtp(email: email);
+            if (!mounted) return;
+            if (resendResponse.success) {
+              final verified = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                  builder: (_) => OtpVerificationScreen(email: email, flow: OtpFlowType.signup),
+                ),
+              );
+
+              if (mounted && verified == true) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+                      (route) => false,
+                );
+              }
+            } else {
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(resendResponse.message ?? 'Failed to send OTP'),
+                  backgroundColor: Colors.red.shade600,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  margin: const EdgeInsets.all(16),
+                ),
+              );
+            }
+          } catch (otpError) {
+            if (mounted) {
+              messenger.showSnackBar(
+                SnackBar(
+                  content: const Text('Failed to send verification code. Please try again.'),
+                  backgroundColor: Colors.red.shade600,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  margin: const EdgeInsets.all(16),
+                ),
+              );
+            }
+          }
+        }
+        return;
+      }
 
       final verified = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
@@ -660,6 +707,85 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _isLoading = false);
+
+      // Check if user needs to verify email
+      if (error.message.toLowerCase().contains('verify your email') ||
+          error.message.toLowerCase().contains('email not verified')) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.info_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Please verify your email. Sending verification code...',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange.shade600,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.all(16),
+          ),
+        );
+
+        // Send OTP first, then redirect to OTP verification for email verification
+        try {
+          final resendResponse = await _api.resendOtp(email: email);
+          if (!mounted) return;
+          if (resendResponse.success) {
+            final verified = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(
+                builder: (_) => OtpVerificationScreen(email: email, flow: OtpFlowType.signup),
+              ),
+            );
+
+            if (mounted && verified == true) {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+                    (route) => false,
+              );
+            }
+          } else {
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text(resendResponse.message ?? 'Failed to send OTP'),
+                backgroundColor: Colors.red.shade600,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                margin: const EdgeInsets.all(16),
+              ),
+            );
+          }
+        } catch (otpError) {
+          if (mounted) {
+            messenger.showSnackBar(
+              SnackBar(
+                content: const Text('Failed to send verification code. Please try again.'),
+                backgroundColor: Colors.red.shade600,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                margin: const EdgeInsets.all(16),
+              ),
+            );
+          }
+        }
+        return;
+      }
 
       messenger.showSnackBar(
         SnackBar(
